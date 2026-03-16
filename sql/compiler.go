@@ -42,9 +42,11 @@ func (c *DefaultCompiler) Compile(expr query.Expr, ctx CompileContext) (string, 
 		sb.WriteString("JOIN iteration_tasks it ON it.task_path = t.canonical_path\n")
 		sb.WriteString("JOIN iterations iter ON iter.canonical_path = it.iteration_path\n")
 	}
-	if state.needsSLAJoin {
-		sb.WriteString("JOIN sla_results sla ON sla.task_path = t.canonical_path\n")
-	}
+
+	// TODO: SLA join disabled — see fields.go for design notes.
+	// if state.needsSLAJoin {
+	// 	sb.WriteString("JOIN sla_results sla ON sla.task_path = t.canonical_path\n")
+	// }
 
 	sb.WriteString("WHERE ")
 	sb.WriteString(whereClause)

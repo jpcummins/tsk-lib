@@ -259,7 +259,8 @@ func TestCompile_SpecExamples(t *testing.T) {
 		`dependency = "launch/plan"`,
 		`status.category = in_progress AND missing(estimate)`,
 		`iteration.status = in_progress AND iteration.start <= date("today")`,
-		`sla.id = "security-30d" AND sla.status = "breached"`,
+		// TODO: SLA queries disabled — see fields.go and query/validate.go
+		// `sla.id = "security-30d" AND sla.status = "breached"`,
 		`has(labels, "capitalizable") AND status.category = done`,
 		`has(labels, "capitalizable") AND NOT has(labels, "not-capitalizable")`,
 	}
@@ -296,3 +297,21 @@ func TestCompile_SpecExamples(t *testing.T) {
 		})
 	}
 }
+
+// TODO: SLA status tests disabled — see fields.go and query/validate.go.
+// Re-enable once SLA query architecture is designed.
+//
+// func TestCompile_SLAStatus(t *testing.T) {
+// 	tests := []struct {
+// 		name    string
+// 		input   string
+// 		wantSQL string
+// 	}{
+// 		{
+// 			name:    "sla status breached",
+// 			input:   `sla.status = "breached"`,
+// 			wantSQL: "sla.status = ?",
+// 		},
+// 	}
+// 	...
+// }

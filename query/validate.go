@@ -63,12 +63,22 @@ var validFields = map[string]FieldType{
 	"iteration.end":             FieldDatetime,
 	"iteration.path":            FieldString,
 
-	// SLA fields (reporting only).
-	"sla.id":        FieldString,
-	"sla.status":    FieldEnum,
-	"sla.target":    FieldDuration,
-	"sla.elapsed":   FieldDuration,
-	"sla.remaining": FieldDuration,
+	// SLA fields (reporting only — TODO: requires significant design work).
+	// See sql/fields.go for implementation notes.
+	//
+	// SLA queries require computing status at query time by:
+	// 1. Joining tasks with SLA rules (evaluating rule.query)
+	// 2. Calculating elapsed time based on start/stop events
+	// 3. Comparing against target duration to derive status
+	//
+	// Implementation options include materialized views, background refresh,
+	// or real-time computation. Do not enable until architecture is decided.
+	//
+	// "sla.id":        FieldString,
+	// "sla.status":    FieldEnum,
+	// "sla.target":    FieldDuration,
+	// "sla.elapsed":   FieldDuration,
+	// "sla.remaining": FieldDuration,
 }
 
 // validFunctions maps function names to their expected arity (-1 for variadic).

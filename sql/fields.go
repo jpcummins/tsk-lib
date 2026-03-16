@@ -42,12 +42,23 @@ var fieldMapping = map[string]fieldInfo{
 	"iteration.end":             {column: "iter.end", needsIterJoin: true},
 	"iteration.path":            {column: "iter.canonical_path", needsIterJoin: true},
 
-	// SLA fields (require JOIN to materialized SLA results).
-	"sla.id":        {column: "sla.rule_id", needsSLAJoin: true},
-	"sla.status":    {column: "sla.status", needsSLAJoin: true},
-	"sla.target":    {column: "sla.target_mins", needsSLAJoin: true, isDuration: true},
-	"sla.elapsed":   {column: "sla.elapsed_mins", needsSLAJoin: true, isDuration: true},
-	"sla.remaining": {column: "sla.remaining_mins", needsSLAJoin: true, isDuration: true},
+	// TODO: SLA fields need significant design work.
+	//
+	// The spec defines sla.* fields for reporting, but their implementation
+	// requires careful thought:
+	// - Should SLA status be computed at index time (stale) or query time (slow)?
+	// - How to efficiently join tasks with SLA rules, evaluate rule queries,
+	//   calculate elapsed time, and derive status at query time?
+	// - Should we use a materialized view, background refresh, or real-time
+	//   computation?
+	//
+	// For now, SLA fields are disabled. Uncomment once implemented.
+	//
+	// "sla.id":        {column: "sla.rule_id", needsSLAJoin: true},
+	// "sla.status":    {column: "sla.status", needsSLAJoin: true},
+	// "sla.target":    {column: "sla.target_mins", needsSLAJoin: true, isDuration: true},
+	// "sla.elapsed":   {column: "sla.elapsed_mins", needsSLAJoin: true, isDuration: true},
+	// "sla.remaining": {column: "sla.remaining_mins", needsSLAJoin: true, isDuration: true},
 }
 
 // fieldInfo describes how a DSL field maps to SQL.
