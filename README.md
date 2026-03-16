@@ -1,6 +1,6 @@
 # tsk-lib
 
-Go library for parsing, indexing, and querying [tsk](https://github.com/jp/tsk-spec) task repositories.
+Go library for parsing, indexing, and querying [tsk](https://github.com/jpcummins/tsk-spec) task repositories.
 
 ## Features
 
