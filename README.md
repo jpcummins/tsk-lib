@@ -14,7 +14,7 @@ Go library for parsing, indexing, and querying [tsk](https://github.com/jpcummin
 ## Installation
 
 ```bash
-go get github.com/jp/tsk-lib
+go get github.com/jpcummins/tsk-lib
 ```
 
 ## Quick Start
@@ -24,8 +24,8 @@ package main
 
 import (
     "fmt"
-    "github.com/jp/tsk-lib/engine"
-    "github.com/jp/tsk-lib/search"
+    "github.com/jpcummins/tsk-lib/engine"
+    "github.com/jpcummins/tsk-lib/search"
 )
 
 func main() {
@@ -78,7 +78,7 @@ The DSL supports:
 - Functions: `me()`, `my_team()`, `team(name)`, `has(labels, "bug")`
 - Operators: `=`, `!=`, `<`, `>`, `~` (contains), `IN`
 
-See [tsk-spec](https://github.com/jp/tsk-spec) section 12.1 for full reference.
+See [tsk-spec](https://github.com/jpcummins/tsk-spec) section 12.1 for full reference.
 
 ### Fuzzy Search
 
@@ -152,8 +152,8 @@ type Team struct {
 
 ## Related Projects
 
-- [tsk-spec](https://github.com/jp/tsk-spec) - Formal specification
-- [tsk-cli](https://github.com/jp/tsk-cli) - Terminal UI
+- [tsk-spec](https://github.com/jpcummins/tsk-spec) - Formal specification
+- [tsk-cli](https://github.com/jpcummins/tsk-cli) - Terminal UI
 
 ## License
 
