@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jp/tsk-lib/model"
-	"github.com/jp/tsk-lib/query"
+	"github.com/jpcummins/tsk-lib/model"
+	"github.com/jpcummins/tsk-lib/query"
 )
 
 // CompileContext provides runtime values needed during SQL generation.

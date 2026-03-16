@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jp/tsk-lib/model"
+	"github.com/jpcummins/tsk-lib/model"
 )
 
 // resolveLabels applies union semantics for label inheritance (Section 5, Labels).

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jp/tsk-lib/query"
+	"github.com/jpcummins/tsk-lib/query"
 )
 
 // mockContext implements CompileContext for testing.

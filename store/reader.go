@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jp/tsk-lib/model"
+	"github.com/jpcummins/tsk-lib/model"
 )
 
 // TaskByPath returns a single task by canonical path.

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jp/tsk-lib/model"
+	"github.com/jpcummins/tsk-lib/model"
 )
 
 func TestEngine_Index_MinimalTodo(t *testing.T) {

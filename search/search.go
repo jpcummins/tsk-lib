@@ -8,7 +8,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/jp/tsk-lib/model"
+	"github.com/jpcummins/tsk-lib/model"
 )
 
 // Range is a half-open byte range [Start, End) within a string.

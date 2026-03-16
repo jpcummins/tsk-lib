@@ -3,8 +3,8 @@ package parse
 import (
 	"strings"
 
-	"github.com/jp/tsk-lib/model"
-	"github.com/jp/tsk-lib/scan"
+	"github.com/jpcummins/tsk-lib/model"
+	"github.com/jpcummins/tsk-lib/scan"
 )
 
 // parseTask converts a scanned task entry into a model.Task.

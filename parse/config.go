@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
-	"github.com/jp/tsk-lib/model"
-	"github.com/jp/tsk-lib/scan"
+	"github.com/jpcummins/tsk-lib/model"
+	"github.com/jpcummins/tsk-lib/scan"
 )
 
 // rawConfig is the TOML structure for .config.toml files.

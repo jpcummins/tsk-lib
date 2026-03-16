@@ -3,8 +3,8 @@ package parse
 import (
 	"fmt"
 
-	"github.com/jp/tsk-lib/model"
-	"github.com/jp/tsk-lib/scan"
+	"github.com/jpcummins/tsk-lib/model"
+	"github.com/jpcummins/tsk-lib/scan"
 )
 
 // EntryProvider supplies raw filesystem entries for parsing.

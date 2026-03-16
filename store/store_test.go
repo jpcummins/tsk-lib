@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jp/tsk-lib/model"
-	"github.com/jp/tsk-lib/parse"
-	"github.com/jp/tsk-lib/scan"
+	"github.com/jpcummins/tsk-lib/model"
+	"github.com/jpcummins/tsk-lib/parse"
+	"github.com/jpcummins/tsk-lib/scan"
 )
 
 func TestWriteAndRead_MinimalTodo(t *testing.T) {

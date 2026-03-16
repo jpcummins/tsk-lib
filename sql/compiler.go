@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jp/tsk-lib/query"
+	"github.com/jpcummins/tsk-lib/query"
 )
 
 // Compiler translates a query AST into a SQL SELECT statement.

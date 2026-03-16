@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jp/tsk-lib/model"
+	"github.com/jpcummins/tsk-lib/model"
 )
 
 // configChain builds the ordered list of configs from root to most specific

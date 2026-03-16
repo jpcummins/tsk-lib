@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jp/tsk-lib/model"
+	"github.com/jpcummins/tsk-lib/model"
 
 	_ "modernc.org/sqlite" // Pure-Go SQLite driver.
 )

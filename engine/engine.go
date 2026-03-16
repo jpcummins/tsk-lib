@@ -8,12 +8,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jp/tsk-lib/model"
-	"github.com/jp/tsk-lib/parse"
-	"github.com/jp/tsk-lib/query"
-	"github.com/jp/tsk-lib/scan"
-	tsql "github.com/jp/tsk-lib/sql"
-	"github.com/jp/tsk-lib/store"
+	"github.com/jpcummins/tsk-lib/model"
+	"github.com/jpcummins/tsk-lib/parse"
+	"github.com/jpcummins/tsk-lib/query"
+	"github.com/jpcummins/tsk-lib/scan"
+	tsql "github.com/jpcummins/tsk-lib/sql"
+	"github.com/jpcummins/tsk-lib/store"
 )
 
 // Engine is the main entry point for tsk operations.

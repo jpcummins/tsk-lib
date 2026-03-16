@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jp/tsk-lib/model"
-	"github.com/jp/tsk-lib/scan"
+	"github.com/jpcummins/tsk-lib/model"
+	"github.com/jpcummins/tsk-lib/scan"
 )
 
 func scanExample(t *testing.T, name string) []scan.Entry {

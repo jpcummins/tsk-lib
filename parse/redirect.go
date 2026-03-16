@@ -3,7 +3,7 @@ package parse
 import (
 	"fmt"
 
-	"github.com/jp/tsk-lib/model"
+	"github.com/jpcummins/tsk-lib/model"
 )
 
 const maxRedirectDepth = 3
