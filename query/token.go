@@ -1,65 +1,51 @@
-// Package query implements the DSL parser for the tsk query language (Section 12.1).
-// It produces an AST from a query string, which can be consumed by the sql/ package
-// for compilation into SQL, or by any other execution backend.
 package query
 
-// TokenType identifies the type of a lexer token.
+// TokenType represents the type of a lexer token.
 type TokenType int
 
 const (
-	// Literals and identifiers.
-	TokenIdent    TokenType = iota // field names, unquoted values like "done"
-	TokenString                    // "quoted string"
-	TokenNumber                    // 42, 3.14
-	TokenDuration                  // 2h, 1.5d, 30m, 1w
-	TokenDate                      // 2026-04-01T17:00:00Z
+	TokenEOF TokenType = iota
 
-	// Keywords.
-	TokenAND // AND
-	TokenOR  // OR
-	TokenNOT // NOT
-	TokenIN  // IN
+	// Literals
+	TokenIdent  // field names, function names
+	TokenString // "quoted string"
+	TokenNumber // 42, 3.14
 
-	// Operators.
+	// Keywords
+	TokenAND
+	TokenOR
+	TokenNOT
+	TokenIN
+
+	// Operators
 	TokenEQ    // =
 	TokenNEQ   // !=
 	TokenLT    // <
 	TokenLTE   // <=
 	TokenGT    // >
 	TokenGTE   // >=
-	TokenTilde // ~ (contains)
+	TokenTilde // ~
 
-	// Delimiters.
+	// Delimiters
 	TokenLParen // (
 	TokenRParen // )
 	TokenLBrack // [
 	TokenRBrack // ]
 	TokenComma  // ,
-
-	// Special.
-	TokenEOF
+	TokenDot    // .
 )
-
-// Token is a single lexer token with its type, literal value, and position.
-type Token struct {
-	Type    TokenType
-	Literal string
-	Pos     int // Byte offset in the input string.
-}
 
 // String returns a human-readable name for the token type.
 func (t TokenType) String() string {
 	switch t {
+	case TokenEOF:
+		return "EOF"
 	case TokenIdent:
 		return "IDENT"
 	case TokenString:
 		return "STRING"
 	case TokenNumber:
 		return "NUMBER"
-	case TokenDuration:
-		return "DURATION"
-	case TokenDate:
-		return "DATE"
 	case TokenAND:
 		return "AND"
 	case TokenOR:
@@ -92,9 +78,16 @@ func (t TokenType) String() string {
 		return "]"
 	case TokenComma:
 		return ","
-	case TokenEOF:
-		return "EOF"
+	case TokenDot:
+		return "."
 	default:
 		return "UNKNOWN"
 	}
+}
+
+// Token represents a single lexer token.
+type Token struct {
+	Type  TokenType
+	Value string
+	Pos   int
 }

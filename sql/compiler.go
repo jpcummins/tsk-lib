@@ -7,12 +7,21 @@ import (
 	"github.com/jpcummins/tsk-lib/query"
 )
 
-// Compiler translates a query AST into a SQL SELECT statement.
+// Compiler compiles a validated query AST into a parameterized SQL query.
 type Compiler interface {
-	Compile(expr query.Expr, ctx CompileContext) (sql string, params []any, err error)
+	Compile(expr query.Expr, ctx CompileContext) (string, []any, error)
 }
 
-// DefaultCompiler is the standard SQL compiler targeting the tsk SQLite schema.
+// CompileContext provides runtime context for SQL generation.
+type CompileContext interface {
+	CurrentUser() string
+	CurrentUserAliases() []string
+	CurrentUserTeams() []string
+	TeamMembers(teamName string) []string
+	ResolveDate(spec string) string
+}
+
+// DefaultCompiler implements the SQL compiler.
 type DefaultCompiler struct{}
 
 // NewCompiler creates a new DefaultCompiler.
@@ -20,294 +29,263 @@ func NewCompiler() *DefaultCompiler {
 	return &DefaultCompiler{}
 }
 
-// Compile takes a validated query AST and produces a SQL SELECT statement
-// that returns task rows matching the query.
-func (c *DefaultCompiler) Compile(expr query.Expr, ctx CompileContext) (string, []any, error) {
-	state := &compileState{ctx: ctx}
-
-	whereClause, params, err := state.compileExpr(expr)
-	if err != nil {
-		return "", nil, err
-	}
-
-	// Build the full SELECT statement.
-	var sb strings.Builder
-	sb.WriteString("SELECT t.canonical_path, t.parent_path, t.date, t.due, t.assignee, ")
-	sb.WriteString("t.summary, t.estimate_mins, t.status, t.status_category, ")
-	sb.WriteString("t.updated_at, t.weight, t.body, t.is_readme\n")
-	sb.WriteString("FROM tasks t\n")
-
-	// Add JOINs if needed.
-	if state.needsIterJoin {
-		sb.WriteString("JOIN iteration_tasks it ON it.task_path = t.canonical_path\n")
-		sb.WriteString("JOIN iterations iter ON iter.canonical_path = it.iteration_path\n")
-	}
-
-	// TODO: SLA join disabled — see fields.go for design notes.
-	// if state.needsSLAJoin {
-	// 	sb.WriteString("JOIN sla_results sla ON sla.task_path = t.canonical_path\n")
-	// }
-
-	sb.WriteString("WHERE ")
-	sb.WriteString(whereClause)
-
-	// Deduplicate if joins could produce multiple rows per task.
-	if state.needsIterJoin || state.needsSLAJoin {
-		sb.WriteString("\nGROUP BY t.canonical_path")
-	}
-
-	return sb.String(), params, nil
-}
-
-// compileState tracks JOINs needed during compilation.
+// compileState tracks JOIN requirements during compilation.
 type compileState struct {
-	ctx           CompileContext
+	params        []any
 	needsIterJoin bool
 	needsSLAJoin  bool
 }
 
-// compileExpr recursively compiles an expression into a SQL WHERE fragment.
-func (s *compileState) compileExpr(expr query.Expr) (string, []any, error) {
+// Compile generates a parameterized SQL SELECT from a query AST.
+func (c *DefaultCompiler) Compile(expr query.Expr, ctx CompileContext) (string, []any, error) {
+	state := &compileState{}
+
+	where, err := compileExpr(expr, state, ctx)
+	if err != nil {
+		return "", nil, err
+	}
+
+	var sb strings.Builder
+	sb.WriteString("SELECT DISTINCT t.path FROM tasks t")
+
+	if state.needsIterJoin {
+		sb.WriteString(" JOIN iteration_tasks it ON t.path = it.task_path")
+		sb.WriteString(" JOIN iterations i ON it.iteration_id = i.id")
+	}
+
+	if state.needsSLAJoin {
+		sb.WriteString(" JOIN sla_results sr ON t.path = sr.task_path")
+	}
+
+	sb.WriteString(" WHERE t.is_stub = 0")
+	if where != "" {
+		sb.WriteString(" AND (")
+		sb.WriteString(where)
+		sb.WriteString(")")
+	}
+
+	return sb.String(), state.params, nil
+}
+
+func compileExpr(expr query.Expr, state *compileState, ctx CompileContext) (string, error) {
 	switch e := expr.(type) {
 	case *query.BinaryExpr:
-		return s.compileBinary(e)
+		left, err := compileExpr(e.Left, state, ctx)
+		if err != nil {
+			return "", err
+		}
+		right, err := compileExpr(e.Right, state, ctx)
+		if err != nil {
+			return "", err
+		}
+		op := "AND"
+		if e.Op == query.TokenOR {
+			op = "OR"
+		}
+		return fmt.Sprintf("(%s %s %s)", left, op, right), nil
+
 	case *query.UnaryExpr:
-		return s.compileUnary(e)
+		inner, err := compileExpr(e.Expr, state, ctx)
+		if err != nil {
+			return "", err
+		}
+		// NOT on iteration/sla negates existence
+		return fmt.Sprintf("NOT (%s)", inner), nil
+
 	case *query.Predicate:
-		return s.compilePredicate(e)
+		return compilePredicate(e, state, ctx)
+
 	case *query.FuncCall:
-		return s.compileFunc(e)
-	default:
-		return "", nil, fmt.Errorf("unknown expression type %T", expr)
+		return compileFuncCall(e, state, ctx)
 	}
+
+	return "", fmt.Errorf("unknown expression type: %T", expr)
 }
 
-func (s *compileState) compileBinary(e *query.BinaryExpr) (string, []any, error) {
-	left, lParams, err := s.compileExpr(e.Left)
-	if err != nil {
-		return "", nil, err
-	}
-	right, rParams, err := s.compileExpr(e.Right)
-	if err != nil {
-		return "", nil, err
-	}
+func compilePredicate(pred *query.Predicate, state *compileState, ctx CompileContext) (string, error) {
+	field := resolveField(pred)
 
-	op := "AND"
-	if e.Op == query.TokenOR {
-		op = "OR"
+	// Check for iteration/sla fields
+	if strings.HasPrefix(field, "iteration.") {
+		state.needsIterJoin = true
+	}
+	if strings.HasPrefix(field, "sla.") {
+		state.needsSLAJoin = true
 	}
 
-	sql := fmt.Sprintf("(%s %s %s)", left, op, right)
-	return sql, append(lParams, rParams...), nil
-}
-
-func (s *compileState) compileUnary(e *query.UnaryExpr) (string, []any, error) {
-	operand, params, err := s.compileExpr(e.Operand)
-	if err != nil {
-		return "", nil, err
-	}
-	return fmt.Sprintf("NOT (%s)", operand), params, nil
-}
-
-func (s *compileState) compilePredicate(p *query.Predicate) (string, []any, error) {
-	info, ok := lookupField(p.Field)
+	// Get SQL column
+	col, ok := fieldMapping[field]
 	if !ok {
-		return "", nil, fmt.Errorf("unknown field %q", p.Field)
+		return "0", nil // unknown field -> always false
 	}
 
-	// Track required JOINs.
-	if info.needsIterJoin {
-		s.needsIterJoin = true
-	}
-	if info.needsSLAJoin {
-		s.needsSLAJoin = true
-	}
+	// Compile operator and value
+	sqlOp := compileSQLOp(pred.Op)
 
-	// Handle relation fields (dependency, labels) with subqueries.
-	if info.isRelation {
-		return s.compileRelationPredicate(p, info)
-	}
-
-	// Handle IN operator specially.
-	if p.Op == query.TokenIN {
-		return s.compileIN(info.column, p.Value)
-	}
-
-	// If the value is a function that expands to a self-contained expression
-	// (e.g., team("backend") -> "t.assignee IN (?, ?, ?)"), use it directly.
-	if fv, ok := p.Value.(query.FuncValue); ok {
-		valSQL, valParams, err := expandFunc(fv.Call, s.ctx)
-		if err != nil {
-			return "", nil, err
+	switch v := pred.Value.(type) {
+	case *query.StringValue:
+		if pred.Op == query.TokenTilde {
+			state.params = append(state.params, "%"+v.Val+"%")
+			return fmt.Sprintf("%s LIKE ? COLLATE NOCASE", col), nil
 		}
-		// Functions like team(), me(), my_team() expand to expressions
-		// that already include the column reference.
-		switch fv.Call.Name {
-		case "team", "my_team":
-			// These expand to "t.assignee IN (...)" — use directly.
-			return valSQL, valParams, nil
-		case "me":
-			// me() expands to just "?" — use as a normal value.
-			return fmt.Sprintf("%s = %s", info.column, valSQL), valParams, nil
-		case "date":
-			// date() expands to "?" — use as a normal value.
-			sqlOp, err := mapOperator(p.Op)
-			if err != nil {
-				return "", nil, err
+		state.params = append(state.params, v.Val)
+		return fmt.Sprintf("%s %s ?", col, sqlOp), nil
+
+	case *query.NumberValue:
+		state.params = append(state.params, v.Val)
+		return fmt.Sprintf("%s %s ?", col, sqlOp), nil
+
+	case *query.ListValue:
+		placeholders := make([]string, len(v.Values))
+		for i, item := range v.Values {
+			if sv, ok := item.(*query.StringValue); ok {
+				state.params = append(state.params, sv.Val)
 			}
-			return fmt.Sprintf("%s %s %s", info.column, sqlOp, valSQL), valParams, nil
-		default:
-			return fmt.Sprintf("%s = %s", info.column, valSQL), valParams, nil
+			placeholders[i] = "?"
 		}
+		return fmt.Sprintf("%s IN (%s)", col, strings.Join(placeholders, ", ")), nil
+
+	case *query.IdentValue:
+		// Unquoted identifiers in value position are treated as string literals.
+		state.params = append(state.params, v.Name)
+		return fmt.Sprintf("%s %s ?", col, sqlOp), nil
+
+	case *query.FuncValue:
+		return compileFuncValuePredicate(col, sqlOp, v, state, ctx)
 	}
 
-	// Resolve the RHS value.
-	valSQL, valParams, err := s.compileValue(p.Value, info)
-	if err != nil {
-		return "", nil, err
-	}
-
-	// Map DSL operator to SQL operator.
-	sqlOp, err := mapOperator(p.Op)
-	if err != nil {
-		return "", nil, err
-	}
-
-	// Tilde (~) is case-insensitive contains.
-	if p.Op == query.TokenTilde {
-		return fmt.Sprintf("%s LIKE '%%' || ? || '%%' COLLATE NOCASE", info.column), valParams, nil
-	}
-
-	sql := fmt.Sprintf("%s %s %s", info.column, sqlOp, valSQL)
-	return sql, valParams, nil
+	return "0", nil
 }
 
-func (s *compileState) compileRelationPredicate(p *query.Predicate, info fieldInfo) (string, []any, error) {
-	valSQL, valParams, err := s.compileValue(p.Value, info)
-	if err != nil {
-		return "", nil, err
-	}
-
-	sqlOp, err := mapOperator(p.Op)
-	if err != nil {
-		return "", nil, err
-	}
-
-	if p.Op == query.TokenTilde {
-		sql := fmt.Sprintf("EXISTS (SELECT 1 FROM %s WHERE task_path = t.canonical_path AND %s LIKE '%%' || ? || '%%' COLLATE NOCASE)",
-			info.relation, info.relColumn)
-		return sql, valParams, nil
-	}
-
-	_ = valSQL
-	sql := fmt.Sprintf("EXISTS (SELECT 1 FROM %s WHERE task_path = t.canonical_path AND %s %s ?)",
-		info.relation, info.relColumn, sqlOp)
-	return sql, valParams, nil
-}
-
-func (s *compileState) compileIN(column string, val query.Value) (string, []any, error) {
-	list, ok := val.(query.ListValue)
-	if !ok {
-		// Single value IN.
-		valStr, err := extractStringValue(val)
-		if err != nil {
-			return "", nil, err
-		}
-		return fmt.Sprintf("%s IN (?)", column), []any{valStr}, nil
-	}
-
-	placeholders := make([]string, len(list.Items))
-	params := make([]any, len(list.Items))
-	for i, item := range list.Items {
-		placeholders[i] = "?"
-		v, err := extractStringValue(item)
-		if err != nil {
-			return "", nil, err
-		}
-		params[i] = v
-	}
-
-	sql := fmt.Sprintf("%s IN (%s)", column, strings.Join(placeholders, ", "))
-	return sql, params, nil
-}
-
-func (s *compileState) compileFunc(fc *query.FuncCall) (string, []any, error) {
-	return expandFunc(fc, s.ctx)
-}
-
-func (s *compileState) compileValue(val query.Value, info fieldInfo) (string, []any, error) {
-	switch v := val.(type) {
-	case query.StringValue:
-		return "?", []any{v.Val}, nil
-
-	case query.IdentValue:
-		return "?", []any{v.Val}, nil
-
-	case query.NumberValue:
-		return "?", []any{v.Val}, nil
-
-	case query.DateValue:
-		return "?", []any{v.Val}, nil
-
-	case query.DurationValue:
-		if info.isDuration {
-			mins, err := durationToMinutes(v.Val)
-			if err != nil {
-				return "", nil, err
+func compileFuncCall(fc *query.FuncCall, state *compileState, ctx CompileContext) (string, error) {
+	switch fc.Name {
+	case "exists":
+		if len(fc.Args) == 1 {
+			if ident, ok := fc.Args[0].(*query.IdentValue); ok {
+				field := "task." + ident.Name
+				if col, ok := fieldMapping[field]; ok {
+					return fmt.Sprintf("%s IS NOT NULL AND %s != ''", col, col), nil
+				}
 			}
-			return "?", []any{mins}, nil
 		}
-		return "?", []any{v.Val}, nil
 
-	case query.FuncValue:
-		return expandFunc(v.Call, s.ctx)
+	case "missing":
+		if len(fc.Args) == 1 {
+			if ident, ok := fc.Args[0].(*query.IdentValue); ok {
+				field := "task." + ident.Name
+				if col, ok := fieldMapping[field]; ok {
+					return fmt.Sprintf("(%s IS NULL OR %s = '')", col, col), nil
+				}
+			}
+		}
 
-	case query.ListValue:
-		// Lists are handled by compileIN.
-		return "?", nil, nil
-
-	default:
-		return "", nil, fmt.Errorf("unsupported value type %T", val)
+	case "has":
+		if len(fc.Args) == 2 {
+			if ident, ok := fc.Args[0].(*query.IdentValue); ok {
+				if sv, ok := fc.Args[1].(*query.StringValue); ok {
+					field := ident.Name
+					if !strings.Contains(field, ".") {
+						field = "task." + field
+					}
+					if table, ok := relationFields[field]; ok {
+						state.params = append(state.params, sv.Val)
+						return fmt.Sprintf("EXISTS (SELECT 1 FROM %s WHERE task_path = t.path AND value = ?)", table), nil
+					}
+				}
+			}
+		}
 	}
+
+	return "0", nil
 }
 
-func mapOperator(op query.TokenType) (string, error) {
+func compileFuncValuePredicate(col, sqlOp string, fn *query.FuncValue, state *compileState, ctx CompileContext) (string, error) {
+	switch fn.Name {
+	case "date":
+		if len(fn.Args) == 1 {
+			if sv, ok := fn.Args[0].(*query.StringValue); ok {
+				resolved := ctx.ResolveDate(sv.Val)
+				state.params = append(state.params, resolved)
+				return fmt.Sprintf("%s %s ?", col, sqlOp), nil
+			}
+		}
+
+	case "team":
+		if len(fn.Args) == 1 {
+			if sv, ok := fn.Args[0].(*query.StringValue); ok {
+				members := ctx.TeamMembers(sv.Val)
+				values := append([]string{"team:" + sv.Val}, members...)
+				placeholders := make([]string, len(values))
+				for i, v := range values {
+					state.params = append(state.params, v)
+					placeholders[i] = "?"
+				}
+				return fmt.Sprintf("%s IN (%s)", col, strings.Join(placeholders, ", ")), nil
+			}
+		}
+
+	case "me":
+		aliases := ctx.CurrentUserAliases()
+		if len(aliases) <= 1 {
+			// No aliases resolved; fall back to direct comparison.
+			state.params = append(state.params, ctx.CurrentUser())
+			return fmt.Sprintf("%s %s ?", col, sqlOp), nil
+		}
+		// Match against all known aliases (identifier, email, etc.).
+		placeholders := make([]string, len(aliases))
+		for i, a := range aliases {
+			state.params = append(state.params, a)
+			placeholders[i] = "?"
+		}
+		return fmt.Sprintf("%s IN (%s)", col, strings.Join(placeholders, ", ")), nil
+
+	case "my_team":
+		teams := ctx.CurrentUserTeams()
+		if len(teams) == 0 {
+			return "0", nil
+		}
+		placeholders := make([]string, len(teams))
+		for i, t := range teams {
+			state.params = append(state.params, "team:"+t)
+			placeholders[i] = "?"
+		}
+		return fmt.Sprintf("%s IN (%s)", col, strings.Join(placeholders, ", ")), nil
+	}
+
+	return "0", nil
+}
+
+func resolveField(pred *query.Predicate) string {
+	if pred.Namespace != "" {
+		return pred.Namespace + "." + pred.FieldName
+	}
+	field := pred.Field
+	if !strings.Contains(field, ".") ||
+		(!strings.HasPrefix(field, "task.") &&
+			!strings.HasPrefix(field, "iteration.") &&
+			!strings.HasPrefix(field, "sla.")) {
+		return "task." + field
+	}
+	return field
+}
+
+func compileSQLOp(op query.TokenType) string {
 	switch op {
 	case query.TokenEQ:
-		return "=", nil
+		return "="
 	case query.TokenNEQ:
-		return "!=", nil
+		return "!="
 	case query.TokenLT:
-		return "<", nil
+		return "<"
 	case query.TokenLTE:
-		return "<=", nil
+		return "<="
 	case query.TokenGT:
-		return ">", nil
+		return ">"
 	case query.TokenGTE:
-		return ">=", nil
+		return ">="
 	case query.TokenTilde:
-		return "LIKE", nil
-	case query.TokenIN:
-		return "IN", nil
+		return "LIKE"
 	default:
-		return "", fmt.Errorf("unsupported operator %s", op)
-	}
-}
-
-// extractStringValue gets the string representation from a Value.
-func extractStringValue(val query.Value) (string, error) {
-	switch v := val.(type) {
-	case query.StringValue:
-		return v.Val, nil
-	case query.IdentValue:
-		return v.Val, nil
-	case query.NumberValue:
-		return v.Val, nil
-	case query.DateValue:
-		return v.Val, nil
-	case query.DurationValue:
-		return v.Val, nil
-	default:
-		return "", fmt.Errorf("cannot extract string from %T", val)
+		return "="
 	}
 }

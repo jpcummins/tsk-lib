@@ -7,70 +7,112 @@ import (
 	"time"
 )
 
-// Duration represents a parsed duration token (e.g., "2h", "1.5d", "1w").
-// Stored internally as minutes for uniform comparison and arithmetic.
-type Duration struct {
-	Minutes int
-	Raw     string // Original token string.
-}
+// Duration represents a work-time duration stored as minutes.
+// Work time assumptions: 8 hours/day, 5 days/week.
+type Duration int64
 
-// Unit multipliers in minutes.
 const (
-	minutesPerMinute = 1
-	minutesPerHour   = 60
-	minutesPerDay    = 480  // 8-hour workday
-	minutesPerWeek   = 2400 // 5 * 8-hour workday
+	MinutesPerHour = 60
+	HoursPerDay    = 8
+	DaysPerWeek    = 5
+	DaysPerMonth   = 20 // 4 weeks
+
+	MinutesPerDay   = MinutesPerHour * HoursPerDay // 480
+	MinutesPerWeek  = MinutesPerDay * DaysPerWeek  // 2400
+	MinutesPerMonth = MinutesPerDay * DaysPerMonth // 9600
 )
 
-// ParseDuration parses a duration token like "2h", "1.5d", "30m", "1w".
-// Supports units: m (minutes), h (hours), d (days/8h), w (weeks/5*8h).
-// Negative values are allowed (e.g., "-2h").
+// ParseDuration parses a duration string like "2h", "1.5d", "1w", "30m".
+// Units: h (hours), d (days), w (weeks), m (months).
+// Decimals are allowed. No spaces between number and unit.
 func ParseDuration(s string) (Duration, error) {
 	s = strings.TrimSpace(s)
-	if len(s) == 0 {
-		return Duration{}, fmt.Errorf("empty duration string")
+	if s == "" {
+		return 0, fmt.Errorf("empty duration string")
 	}
 
+	// Find the unit suffix
 	unit := s[len(s)-1:]
 	numStr := s[:len(s)-1]
 
-	var multiplier int
-	switch unit {
-	case "m":
-		multiplier = minutesPerMinute
-	case "h":
-		multiplier = minutesPerHour
-	case "d":
-		multiplier = minutesPerDay
-	case "w":
-		multiplier = minutesPerWeek
-	default:
-		return Duration{}, fmt.Errorf("unknown duration unit %q in %q", unit, s)
+	if numStr == "" {
+		return 0, fmt.Errorf("invalid duration: %q", s)
 	}
 
 	val, err := strconv.ParseFloat(numStr, 64)
 	if err != nil {
-		return Duration{}, fmt.Errorf("invalid duration number %q in %q: %w", numStr, s, err)
+		return 0, fmt.Errorf("invalid duration number %q: %w", numStr, err)
 	}
 
-	minutes := int(val * float64(multiplier))
-	return Duration{Minutes: minutes, Raw: s}, nil
+	var minutes float64
+	switch unit {
+	case "h":
+		minutes = val * float64(MinutesPerHour)
+	case "d":
+		minutes = val * float64(MinutesPerDay)
+	case "w":
+		minutes = val * float64(MinutesPerWeek)
+	case "m":
+		minutes = val * float64(MinutesPerMonth)
+	default:
+		return 0, fmt.Errorf("unknown duration unit %q in %q", unit, s)
+	}
+
+	return Duration(minutes), nil
 }
 
-// TimeDuration converts to a standard time.Duration (using real minutes).
-func (d Duration) TimeDuration() time.Duration {
-	return time.Duration(d.Minutes) * time.Minute
+// Minutes returns the total minutes.
+func (d Duration) Minutes() int64 {
+	return int64(d)
 }
 
-// String returns the original raw token if available, otherwise a computed representation.
+// Hours returns the duration in hours.
+func (d Duration) Hours() float64 {
+	return float64(d) / float64(MinutesPerHour)
+}
+
+// Days returns the duration in work days.
+func (d Duration) Days() float64 {
+	return float64(d) / float64(MinutesPerDay)
+}
+
+// String returns a human-readable representation.
 func (d Duration) String() string {
-	if d.Raw != "" {
-		return d.Raw
+	mins := int64(d)
+	if mins == 0 {
+		return "0h"
 	}
-	return fmt.Sprintf("%dm", d.Minutes)
+
+	negative := mins < 0
+	if negative {
+		mins = -mins
+	}
+
+	prefix := ""
+	if negative {
+		prefix = "-"
+	}
+
+	if mins >= int64(MinutesPerMonth) && mins%int64(MinutesPerMonth) == 0 {
+		return fmt.Sprintf("%s%dm", prefix, mins/int64(MinutesPerMonth))
+	}
+	if mins >= int64(MinutesPerWeek) && mins%int64(MinutesPerWeek) == 0 {
+		return fmt.Sprintf("%s%dw", prefix, mins/int64(MinutesPerWeek))
+	}
+	if mins >= int64(MinutesPerDay) && mins%int64(MinutesPerDay) == 0 {
+		return fmt.Sprintf("%s%dd", prefix, mins/int64(MinutesPerDay))
+	}
+	if mins%int64(MinutesPerHour) == 0 {
+		return fmt.Sprintf("%s%dh", prefix, mins/int64(MinutesPerHour))
+	}
+
+	// Fall back to fractional hours
+	hours := float64(mins) / float64(MinutesPerHour)
+	return fmt.Sprintf("%s%.1fh", prefix, hours)
 }
 
-// IsZero returns true if the duration is zero.
-func (d Duration) IsZero() bool {
-	return d.Minutes == 0
+// ToDuration converts a work-time Duration to a standard time.Duration
+// using wall-clock equivalents (for SLA elapsed time comparisons).
+func (d Duration) ToDuration() time.Duration {
+	return time.Duration(int64(d)) * time.Minute
 }

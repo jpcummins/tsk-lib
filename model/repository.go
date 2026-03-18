@@ -1,29 +1,52 @@
 package model
 
-// Repository is the fully resolved in-memory representation of a tsk workspace.
-// Produced by the parse/ package after scanning, parsing, and resolution.
+// Repository is the aggregate root for a fully resolved tsk repository.
 type Repository struct {
-	// Root directory that was scanned.
-	Root string
+	// Version is the repository spec version from root config.toml.
+	Version string
 
-	// All resolved tasks (stubs excluded, redirects resolved).
-	Tasks []*Task
+	// Tasks maps canonical paths to resolved tasks.
+	Tasks map[CanonicalPath]*Task
 
-	// All iterations across all teams.
+	// Iterations contains all parsed iterations.
 	Iterations []*Iteration
 
-	// All teams with their members and config.
-	Teams []*Team
+	// Teams maps team names to team definitions.
+	Teams map[string]*Team
 
-	// Resolved config chain (ordered from root to most specific).
+	// Configs is the chain of parsed configs (root first, most specific last).
 	Configs []*Config
 
-	// SLA rules from sla.toml.
+	// SLARules contains all parsed SLA rules.
 	SLARules []*SLARule
 
-	// Stubs for reference (not included in task list, but useful for diagnostics).
-	Stubs []*Task
+	// SLAResults contains computed SLA results (populated after evaluation).
+	SLAResults []*SLAResult
 
-	// Warnings accumulated during resolution.
-	Warnings []string
+	// Stubs maps stub paths to their redirect targets.
+	Stubs map[CanonicalPath]CanonicalPath
+
+	// Diagnostics collects all warnings and errors from parsing/resolution.
+	Diagnostics Diagnostics
+}
+
+// NewRepository creates an empty Repository.
+func NewRepository() *Repository {
+	return &Repository{
+		Tasks: make(map[CanonicalPath]*Task),
+		Teams: make(map[string]*Team),
+		Stubs: make(map[CanonicalPath]CanonicalPath),
+	}
+}
+
+// OrderedTasks returns tasks ordered by weight (lower first), then by path (lexicographic).
+func (r *Repository) OrderedTasks() []*Task {
+	tasks := make([]*Task, 0, len(r.Tasks))
+	for _, t := range r.Tasks {
+		if !t.IsStub {
+			tasks = append(tasks, t)
+		}
+	}
+	SortTasks(tasks)
+	return tasks
 }

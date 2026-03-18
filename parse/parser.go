@@ -2,130 +2,157 @@ package parse
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/jpcummins/tsk-lib/model"
 	"github.com/jpcummins/tsk-lib/scan"
 )
 
-// EntryProvider supplies raw filesystem entries for parsing.
-// Satisfied by scan.Scanner or a test fixture.
-type EntryProvider interface {
-	Scan(root string) ([]scan.Entry, error)
-}
-
-// Parser converts scanned entries into a fully resolved Repository.
+// Parser resolves scanned entries into a fully resolved Repository.
 type Parser interface {
 	Parse(entries []scan.Entry) (*model.Repository, error)
 }
 
-// DefaultParser is the standard Parser implementation.
+// DefaultParser implements the multi-phase resolution pipeline.
 type DefaultParser struct{}
 
-// NewParser returns a new DefaultParser.
+// NewParser creates a new DefaultParser.
 func NewParser() *DefaultParser {
 	return &DefaultParser{}
 }
 
-// Parse takes raw scanned entries and produces a fully resolved Repository.
-// Resolution phases:
-//  1. Parse individual files (front matter, TOML, Markdown body)
-//  2. Resolve redirects (stub chain resolution, max depth 3)
-//  3. Build config inheritance (deep-merge, defaults, status mapping)
-//  4. Compute effective labels (union semantics from parent to child)
+// Parse executes the 4-phase resolution pipeline:
+// Phase 1: Individual file parsing
+// Phase 2: Redirect resolution
+// Phase 3: Config inheritance + status resolution
+// Phase 4: Assignee resolution
 func (p *DefaultParser) Parse(entries []scan.Entry) (*model.Repository, error) {
-	repo := &model.Repository{}
+	repo := model.NewRepository()
 
-	// ── Phase 1: Parse individual files ──────────────────────────
-	taskMap := make(map[model.CanonicalPath]*model.Task)
-	var iterations []*model.Iteration
-	var configs []*model.Config
-	var teams []*model.Team
+	// Phase 1: Parse individual files
+	if err := p.parseFiles(entries, repo); err != nil {
+		return nil, fmt.Errorf("phase 1 (parse): %w", err)
+	}
+
+	// Phase 2: Resolve redirects
+	resolveStubs(repo)
+
+	// Resolve dependencies through stubs
+	resolveDependencies(repo)
+
+	// Phase 3: Config inheritance + status resolution
+	resolveStatusCategories(repo)
+
+	// Resolve hierarchy (directory vs file precedence)
+	resolveHierarchy(repo)
+
+	// Phase 4: Path warnings
+	p.checkPathWarnings(entries, repo)
+
+	return repo, nil
+}
+
+// parseFiles handles Phase 1: individual file parsing.
+func (p *DefaultParser) parseFiles(entries []scan.Entry, repo *model.Repository) error {
+	// Collect tasks, potentially multiple per path
+	tasksByPath := make(map[model.CanonicalPath][]*model.Task)
 
 	for _, entry := range entries {
 		switch entry.Kind {
 		case scan.EntryTask:
 			task, err := parseTask(entry)
 			if err != nil {
-				repo.Warnings = append(repo.Warnings,
-					fmt.Sprintf("skipping %s: %v", entry.Path, err))
-				continue
+				return err
 			}
-			// Section 2.2: if a directory and file share the same path,
-			// directory container takes precedence. README (IsReadme) wins.
-			if existing, ok := taskMap[task.CanonicalPath]; ok {
-				if task.IsReadme {
-					taskMap[task.CanonicalPath] = task
-					repo.Warnings = append(repo.Warnings,
-						fmt.Sprintf("duplicate path %q: README takes precedence over %q",
-							task.CanonicalPath, existing.CanonicalPath))
-				} else {
-					repo.Warnings = append(repo.Warnings,
-						fmt.Sprintf("duplicate path %q: keeping existing entry",
-							task.CanonicalPath))
-				}
-			} else {
-				taskMap[task.CanonicalPath] = task
-			}
+			tasksByPath[task.Path] = append(tasksByPath[task.Path], task)
 
-		case scan.EntryRootConfig, scan.EntryProjectConfig:
-			cfg, err := parseConfig(entry)
+		case scan.EntryRootConfig:
+			cfg, err := parseConfig(entry.Content, "")
 			if err != nil {
-				repo.Warnings = append(repo.Warnings,
-					fmt.Sprintf("skipping config %s: %v", entry.Path, err))
-				continue
+				return fmt.Errorf("parsing root config: %w", err)
 			}
-			configs = append(configs, cfg)
+			repo.Version = cfg.Version
+			repo.Configs = append(repo.Configs, cfg)
+
+		case scan.EntryProjectConfig:
+			// Path like "tasks/project/config.toml" -> config path "project"
+			path := strings.TrimPrefix(entry.Path, "tasks/")
+			path = strings.TrimSuffix(path, "/config.toml")
+			cfg, err := parseConfig(entry.Content, path)
+			if err != nil {
+				return fmt.Errorf("parsing config %s: %w", entry.Path, err)
+			}
+			repo.Configs = append(repo.Configs, cfg)
 
 		case scan.EntryTeamConfig:
-			team, err := parseTeamConfig(entry)
-			if err != nil {
-				repo.Warnings = append(repo.Warnings,
-					fmt.Sprintf("skipping team %s: %v", entry.Path, err))
+			// Path like "teams/backend/team.toml" -> team name "backend"
+			parts := strings.Split(entry.Path, "/")
+			if len(parts) < 3 {
 				continue
 			}
-			teams = append(teams, team)
+			teamName := parts[1]
+			team, err := parseTeamConfig(entry.Content, teamName)
+			if err != nil {
+				return fmt.Errorf("parsing team %s: %w", entry.Path, err)
+			}
+			repo.Teams[teamName] = team
 
 		case scan.EntryIteration:
 			iter, err := parseIteration(entry)
 			if err != nil {
-				repo.Warnings = append(repo.Warnings,
-					fmt.Sprintf("skipping iteration %s: %v", entry.Path, err))
-				continue
+				return fmt.Errorf("parsing iteration %s: %w", entry.Path, err)
 			}
-			iterations = append(iterations, iter)
+			repo.Iterations = append(repo.Iterations, iter)
 
 		case scan.EntrySLA:
-			rules, err := parseSLARules(entry)
+			rules, err := parseSLAFile(entry.Content)
 			if err != nil {
-				repo.Warnings = append(repo.Warnings,
-					fmt.Sprintf("skipping sla.toml: %v", err))
-				continue
+				return fmt.Errorf("parsing SLA rules: %w", err)
 			}
-			repo.SLARules = rules
+			repo.SLARules = append(repo.SLARules, rules...)
 		}
 	}
 
-	// ── Phase 2: Resolve redirects ────────────────────────────────
-	resolved, stubs, redirectWarnings, err := resolveRedirects(taskMap)
-	if err != nil {
-		return nil, fmt.Errorf("resolving redirects: %w", err)
+	// Resolve path conflicts: README.md (directory) takes precedence over leaf files
+	for path, tasks := range tasksByPath {
+		if len(tasks) == 1 {
+			repo.Tasks[path] = tasks[0]
+			continue
+		}
+
+		// Multiple tasks at the same path: prefer the README (directory container)
+		var readme *model.Task
+		for _, t := range tasks {
+			if t.IsReadme {
+				readme = t
+				break
+			}
+		}
+
+		if readme != nil {
+			repo.Tasks[path] = readme
+			repo.Diagnostics = append(repo.Diagnostics, model.NewWarningf(
+				model.CodePathCaseConflict,
+				"directory container takes precedence over task file at %s", path))
+		} else {
+			// No README; use first one (arbitrary)
+			repo.Tasks[path] = tasks[0]
+		}
 	}
-	repo.Stubs = stubs
-	repo.Warnings = append(repo.Warnings, redirectWarnings...)
 
-	// ── Phase 3: Config inheritance + status resolution ───────────
-	resolveInheritance(resolved, iterations, configs, teams)
+	return nil
+}
 
-	// ── Phase 4: Label union semantics ────────────────────────────
-	resolveLabels(resolved)
-
-	// ── Assemble final repository ─────────────────────────────────
-	for _, task := range resolved {
-		repo.Tasks = append(repo.Tasks, task)
+// checkPathWarnings emits PATH_UPPERCASE warnings for paths with uppercase chars.
+func (p *DefaultParser) checkPathWarnings(entries []scan.Entry, repo *model.Repository) {
+	for _, entry := range entries {
+		if entry.Kind != scan.EntryTask {
+			continue
+		}
+		if model.ContainsUppercase(entry.Path) {
+			repo.Diagnostics = append(repo.Diagnostics, model.NewWarningf(
+				model.CodePathUppercase,
+				"path contains uppercase characters: %s", entry.Path))
+		}
 	}
-	repo.Iterations = iterations
-	repo.Teams = teams
-	repo.Configs = configs
-
-	return repo, nil
 }

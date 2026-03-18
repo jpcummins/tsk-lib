@@ -1,34 +1,45 @@
-// Package scan walks a tsk repository root and classifies files into typed entries.
-// It performs only I/O and classification — no content parsing.
 package scan
 
-// EntryKind classifies a file's role in the tsk repository.
+// EntryKind classifies a file found during scanning.
 type EntryKind int
 
 const (
-	// EntryTask is a Markdown file under tasks/ (task or stub).
-	EntryTask EntryKind = iota
-	// EntryRootConfig is the root .config.toml.
-	EntryRootConfig
-	// EntryProjectConfig is a .config.toml under tasks/.
-	EntryProjectConfig
-	// EntryTeamConfig is a team.toml under teams/<team>/.
-	EntryTeamConfig
-	// EntryIteration is a Markdown file under teams/<team>/iterations/.
-	EntryIteration
-	// EntrySLA is the root sla.toml.
-	EntrySLA
+	EntryTask          EntryKind = iota // tasks/**/*.md
+	EntryRootConfig                     // config.toml (root)
+	EntryProjectConfig                  // tasks/**/config.toml
+	EntryTeamConfig                     // teams/*/team.toml
+	EntryIteration                      // teams/*/iterations/*.md
+	EntrySLA                            // sla.toml (root only)
 )
 
-// Entry is a raw file discovered during scanning.
-// It carries the file's bytes and classification but no parsed content.
-type Entry struct {
-	// Path is the file path relative to the repository root (forward slashes).
-	Path string
+// String returns a human-readable name for the entry kind.
+func (k EntryKind) String() string {
+	switch k {
+	case EntryTask:
+		return "task"
+	case EntryRootConfig:
+		return "root_config"
+	case EntryProjectConfig:
+		return "project_config"
+	case EntryTeamConfig:
+		return "team_config"
+	case EntryIteration:
+		return "iteration"
+	case EntrySLA:
+		return "sla"
+	default:
+		return "unknown"
+	}
+}
 
-	// Kind classifies the file's role.
+// Entry represents a classified file found during scanning.
+type Entry struct {
+	// Kind is the classification of this file.
 	Kind EntryKind
 
-	// Content is the raw file bytes.
+	// Path is the path relative to the repository root.
+	Path string
+
+	// Content is the raw file content.
 	Content []byte
 }

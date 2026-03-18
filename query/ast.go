@@ -2,95 +2,82 @@ package query
 
 // Expr is the interface for all AST expression nodes.
 type Expr interface {
-	exprNode() // Marker method to restrict the interface.
+	exprNode()
 }
 
-// BinaryExpr represents a boolean combination: left AND|OR right.
+// BinaryExpr represents a binary expression (AND, OR).
 type BinaryExpr struct {
 	Op    TokenType // TokenAND or TokenOR
 	Left  Expr
 	Right Expr
 }
 
-func (BinaryExpr) exprNode() {}
+func (*BinaryExpr) exprNode() {}
 
-// UnaryExpr represents a NOT expression.
+// UnaryExpr represents a unary expression (NOT).
 type UnaryExpr struct {
-	Op      TokenType // TokenNOT
-	Operand Expr
+	Op   TokenType // TokenNOT
+	Expr Expr
 }
 
-func (UnaryExpr) exprNode() {}
+func (*UnaryExpr) exprNode() {}
 
-// Predicate represents a comparison: field op value.
-// Example: task.status = "done", summary ~ "security"
+// Predicate represents a field comparison: field op value.
 type Predicate struct {
-	Field string    // e.g., "task.status", "status.category", "summary"
-	Op    TokenType // TokenEQ, TokenNEQ, TokenLT, etc.
-	Value Value
+	Field     string // qualified or unqualified field name
+	Namespace string // "task", "iteration", "sla" (resolved during validation)
+	FieldName string // unqualified field name (resolved during validation)
+	Op        TokenType
+	Value     Value
 }
 
-func (Predicate) exprNode() {}
+func (*Predicate) exprNode() {}
 
-// FuncCall represents a function invocation.
-// Example: has(labels, "capitalizable"), exists(estimate), team("backend"), me()
+// FuncCall represents a predicate function call: func(args...).
 type FuncCall struct {
 	Name string
 	Args []Value
 }
 
-func (FuncCall) exprNode() {}
+func (*FuncCall) exprNode() {}
 
-// Value is the interface for literal values in the AST.
+// Value is the interface for all AST value nodes.
 type Value interface {
 	valueNode()
 }
 
-// StringValue is a quoted or unquoted string literal.
+// StringValue represents a quoted string literal.
 type StringValue struct {
 	Val string
 }
 
-func (StringValue) valueNode() {}
+func (*StringValue) valueNode() {}
 
-// NumberValue is a numeric literal.
+// NumberValue represents a numeric literal.
 type NumberValue struct {
-	Val string // Raw string to preserve precision.
+	Val string // kept as string for precision
 }
 
-func (NumberValue) valueNode() {}
+func (*NumberValue) valueNode() {}
 
-// DateValue is an RFC3339 date literal.
-type DateValue struct {
-	Val string // Raw RFC3339 string.
-}
-
-func (DateValue) valueNode() {}
-
-// DurationValue is a duration literal (e.g., "2h", "1.5d").
-type DurationValue struct {
-	Val string
-}
-
-func (DurationValue) valueNode() {}
-
-// ListValue is a list of values: ["a", "b", "c"].
+// ListValue represents a list literal: [val1, val2, ...].
 type ListValue struct {
-	Items []Value
+	Values []Value
 }
 
-func (ListValue) valueNode() {}
+func (*ListValue) valueNode() {}
 
-// IdentValue is an unquoted identifier used as a value (e.g., "done", "in_progress").
+// IdentValue represents an unquoted identifier used as a value (e.g., field ref in function args).
 type IdentValue struct {
-	Val string
+	Name string
 }
 
-func (IdentValue) valueNode() {}
+func (*IdentValue) valueNode() {}
 
-// FuncValue wraps a function call used in value position (e.g., team("backend"), me()).
+// FuncValue represents a function call used in value position.
 type FuncValue struct {
-	Call *FuncCall
+	Name string
+	Args []Value
 }
 
-func (FuncValue) valueNode() {}
+func (*FuncValue) valueNode() {}

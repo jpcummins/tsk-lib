@@ -1,62 +1,58 @@
-// Package engine is the top-level orchestrator for the tsk system.
-// It wires together scanning, parsing, storage, query parsing, and
-// SQL compilation. This is the primary public API for consumers.
+// Package engine is the composition root that wires all subsystems together.
 package engine
 
 import (
-	"fmt"
-	"strings"
 	"time"
 
 	"github.com/jpcummins/tsk-lib/model"
 	"github.com/jpcummins/tsk-lib/parse"
 	"github.com/jpcummins/tsk-lib/query"
 	"github.com/jpcummins/tsk-lib/scan"
+	"github.com/jpcummins/tsk-lib/search"
 	tsql "github.com/jpcummins/tsk-lib/sql"
 	"github.com/jpcummins/tsk-lib/store"
 )
 
-// Engine is the main entry point for tsk operations.
-// It holds references to all subsystem interfaces.
+// Engine is the top-level orchestrator for tsk operations.
 type Engine struct {
-	scanner  scan.Scanner
-	parser   parse.Parser
-	store    store.Store
-	compiler tsql.Compiler
-	qparser  query.Parser
-	qvalid   query.Validator
-
-	// Runtime context for query compilation.
+	scanner     scan.Scanner
+	parser      parse.Parser
+	store       store.Store
+	compiler    tsql.Compiler
+	qparser     query.Parser
+	qvalidator  query.Validator
+	searcher    *search.Searcher
 	currentUser string
 }
 
 // Option configures an Engine.
 type Option func(*Engine)
 
-// WithCurrentUser sets the current user identity for me() resolution.
+// WithCurrentUser sets the current user for me()/my_team() queries.
 func WithCurrentUser(user string) Option {
 	return func(e *Engine) {
 		e.currentUser = user
 	}
 }
 
-// New creates a new Engine with the given dependencies.
+// New creates an Engine with injected dependencies.
 func New(
 	scanner scan.Scanner,
 	parser parse.Parser,
 	st store.Store,
 	compiler tsql.Compiler,
 	qparser query.Parser,
-	qvalid query.Validator,
+	qvalidator query.Validator,
 	opts ...Option,
 ) *Engine {
 	e := &Engine{
-		scanner:  scanner,
-		parser:   parser,
-		store:    st,
-		compiler: compiler,
-		qparser:  qparser,
-		qvalid:   qvalid,
+		scanner:    scanner,
+		parser:     parser,
+		store:      st,
+		compiler:   compiler,
+		qparser:    qparser,
+		qvalidator: qvalidator,
+		searcher:   search.NewSearcher(),
 	}
 	for _, opt := range opts {
 		opt(e)
@@ -64,108 +60,151 @@ func New(
 	return e
 }
 
-// NewDefault creates an Engine with all default implementations.
-// The dbPath is the SQLite database path (use ":memory:" for testing).
+// NewDefault creates an Engine with default implementations.
 func NewDefault(dbPath string, opts ...Option) (*Engine, error) {
+	sc := scan.NewFSScanner()
+	p := parse.NewParser()
 	st, err := store.Open(dbPath)
 	if err != nil {
-		return nil, fmt.Errorf("opening store: %w", err)
+		return nil, err
 	}
+	comp := tsql.NewCompiler()
+	qp := query.NewParser()
+	qv := query.NewValidator()
 
-	e := New(
-		scan.NewFSScanner(),
-		parse.NewParser(),
-		st,
-		tsql.NewCompiler(),
-		query.NewParser(),
-		query.NewValidator(),
-		opts...,
-	)
-	return e, nil
+	return New(sc, p, st, comp, qp, qv, opts...), nil
 }
 
-// Close releases engine resources (primarily the database connection).
-func (e *Engine) Close() error {
-	return e.store.Close()
-}
-
-// Index scans the filesystem at root, parses all entries, and writes
-// the resolved repository to the database.
+// Index scans and parses a tsk repository, writing it to the store.
 func (e *Engine) Index(root string) (*model.Repository, error) {
 	entries, err := e.scanner.Scan(root)
 	if err != nil {
-		return nil, fmt.Errorf("scanning %s: %w", root, err)
+		return nil, err
 	}
 
 	repo, err := e.parser.Parse(entries)
 	if err != nil {
-		return nil, fmt.Errorf("parsing: %w", err)
+		return nil, err
 	}
 
-	repo.Root = root
-
-	if err := e.store.WriteRepository(repo); err != nil {
-		return nil, fmt.Errorf("writing to store: %w", err)
+	if e.store != nil {
+		if err := e.store.WriteRepository(repo); err != nil {
+			return nil, err
+		}
 	}
 
 	return repo, nil
 }
 
-// Search parses a DSL query string and returns matching tasks.
-func (e *Engine) Search(queryStr string) ([]*model.Task, error) {
-	ast, err := e.qparser.Parse(queryStr)
+// Query parses, validates, and executes a DSL query.
+func (e *Engine) Query(dsl string) ([]*model.Task, model.Diagnostics, error) {
+	expr, err := e.qparser.Parse(dsl)
 	if err != nil {
-		return nil, fmt.Errorf("parsing query: %w", err)
+		return nil, nil, err
 	}
 
-	if err := e.qvalid.Validate(ast); err != nil {
-		return nil, fmt.Errorf("validating query: %w", err)
+	diags := e.qvalidator.Validate(expr, nil)
+	if diags.HasErrors() {
+		return nil, diags, nil
 	}
 
-	ctx := &engineContext{engine: e}
-
-	sqlStr, params, err := e.compiler.Compile(ast, ctx)
+	sqlStr, params, err := e.compiler.Compile(expr, e.compileContext())
 	if err != nil {
-		return nil, fmt.Errorf("compiling query: %w", err)
+		return nil, diags, err
 	}
 
 	tasks, err := e.store.QueryTasks(sqlStr, params)
 	if err != nil {
-		return nil, fmt.Errorf("executing query: %w", err)
+		return nil, diags, err
 	}
 
-	return tasks, nil
+	return tasks, diags, nil
 }
 
-// engineContext implements sql.CompileContext using the engine's store
-// and runtime configuration.
+// Search performs a fuzzy text search across tasks.
+func (e *Engine) Search(queryStr string) ([]search.Match, error) {
+	tasks, err := e.store.AllTasks()
+	if err != nil {
+		return nil, err
+	}
+	return e.searcher.SearchWithHighlights(tasks, queryStr), nil
+}
+
+// TaskByPath retrieves a single task by canonical path.
+func (e *Engine) TaskByPath(path model.CanonicalPath) (*model.Task, error) {
+	return e.store.TaskByPath(path)
+}
+
+// Close releases resources.
+func (e *Engine) Close() error {
+	if e.store != nil {
+		return e.store.Close()
+	}
+	return nil
+}
+
+// --- CompileContext implementation ---
+
 type engineContext struct {
 	engine *Engine
+}
+
+func (e *Engine) compileContext() tsql.CompileContext {
+	return &engineContext{engine: e}
 }
 
 func (c *engineContext) CurrentUser() string {
 	return c.engine.currentUser
 }
 
-func (c *engineContext) CurrentUserTeams() []string {
-	if c.engine.currentUser == "" {
+func (c *engineContext) CurrentUserAliases() []string {
+	user := c.engine.currentUser
+	if user == "" {
 		return nil
 	}
 
-	teamNames, err := c.engine.store.AllTeamNames()
+	seen := map[string]bool{user: true}
+	aliases := []string{user}
+
+	names, err := c.engine.store.AllTeamNames()
 	if err != nil {
-		return nil
+		return aliases
 	}
-
-	var teams []string
-	for _, teamName := range teamNames {
-		members, err := c.engine.store.TeamMembers(teamName)
+	for _, name := range names {
+		members, err := c.engine.store.TeamMembers(name)
 		if err != nil {
 			continue
 		}
 		for _, m := range members {
-			if m.Email == c.engine.currentUser {
-				teams = append(teams, teamName)
+			if m.Identifier == user || m.Email == user {
+				if !seen[m.Identifier] {
+					seen[m.Identifier] = true
+					aliases = append(aliases, m.Identifier)
+				}
+				if m.Email != "" && !seen[m.Email] {
+					seen[m.Email] = true
+					aliases = append(aliases, m.Email)
+				}
+			}
+		}
+	}
+	return aliases
+}
+
+func (c *engineContext) CurrentUserTeams() []string {
+	names, err := c.engine.store.AllTeamNames()
+	if err != nil {
+		return nil
+	}
+	var teams []string
+	for _, name := range names {
+		members, err := c.engine.store.TeamMembers(name)
+		if err != nil {
+			continue
+		}
+		for _, m := range members {
+			if m.Identifier == c.engine.currentUser || m.Email == c.engine.currentUser {
+				teams = append(teams, name)
 				break
 			}
 		}
@@ -173,32 +212,26 @@ func (c *engineContext) CurrentUserTeams() []string {
 	return teams
 }
 
-func (c *engineContext) TeamMembers(team string) ([]string, error) {
-	members, err := c.engine.store.TeamMembers(team)
+func (c *engineContext) TeamMembers(teamName string) []string {
+	members, err := c.engine.store.TeamMembers(teamName)
 	if err != nil {
-		return nil, err
+		return nil
 	}
-	var emails []string
+	var ids []string
 	for _, m := range members {
-		emails = append(emails, m.Email)
+		ids = append(ids, m.Identifier)
+		if m.Email != "" {
+			ids = append(ids, m.Email)
+		}
 	}
-	return emails, nil
+	return ids
 }
 
-func (c *engineContext) ResolveDate(token string) (time.Time, error) {
-	now := time.Now().UTC()
-
-	switch strings.ToLower(token) {
-	case "today":
-		y, m, d := now.Date()
-		return time.Date(y, m, d, 0, 0, 0, 0, time.UTC), nil
-	case "yesterday":
-		y, m, d := now.AddDate(0, 0, -1).Date()
-		return time.Date(y, m, d, 0, 0, 0, 0, time.UTC), nil
-	case "tomorrow":
-		y, m, d := now.AddDate(0, 0, 1).Date()
-		return time.Date(y, m, d, 0, 0, 0, 0, time.UTC), nil
-	default:
-		return time.Parse(time.RFC3339, token)
+func (c *engineContext) ResolveDate(spec string) string {
+	now := time.Now()
+	resolved := query.ResolveDate(spec, now)
+	if resolved != nil {
+		return resolved.Format(time.RFC3339)
 	}
+	return spec
 }

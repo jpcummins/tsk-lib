@@ -1,18 +1,25 @@
 package model
 
-// Team represents a team directory under teams/ (Section 8).
-type Team struct {
-	Name    string
-	Members []TeamMember
+// TeamMember represents a member of a team.
+type TeamMember struct {
+	// Identifier is the short handle (e.g., "alice").
+	Identifier string
 
-	// Iteration status mapping (from team.toml).
-	IterationStatusMap StatusMap
+	// Value is the full value from team.toml (e.g., "Alice Smith <alice@example.com>").
+	Value string
+
+	// Name is the parsed display name (may be empty).
+	Name string
+
+	// Email is the parsed email address (may be empty).
+	Email string
 }
 
-// TeamMember represents a member entry from team.toml.
-// Parsed from the "First Last <email@example.com>" format.
-type TeamMember struct {
-	Display string // Full display string (e.g., "Alice Smith <alice@example.com>").
-	Name    string // Parsed name portion (e.g., "Alice Smith").
-	Email   string // Parsed email (e.g., "alice@example.com").
+// Team represents a team defined under teams/<name>/.
+type Team struct {
+	// Name is the team identifier (directory name).
+	Name string
+
+	// Members maps member identifiers to their details.
+	Members map[string]TeamMember
 }

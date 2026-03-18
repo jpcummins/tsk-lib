@@ -2,25 +2,37 @@ package model
 
 import "time"
 
-// Iteration represents a team iteration/sprint (Section 9).
+// Iteration represents a time-boxed work period (sprint).
 type Iteration struct {
-	// Identity — derived from the file path under teams/<team>/iterations/.
-	CanonicalPath CanonicalPath
+	// ID is derived from path: <team>/<filename> (lowercase, no extension).
+	ID string
 
-	// Required fields
-	Start  time.Time
-	End    time.Time
-	Status string
-	Tasks  []CanonicalPath // Ordered list of task canonical paths.
+	// Team is derived from the directory path.
+	Team string
 
-	// Resolved
-	StatusCategory StatusCategory // Resolved from iteration status map.
-	Team           string         // Derived from directory path or explicit field.
+	// Start is the iteration start time.
+	Start time.Time
 
-	// Optional fields
-	Name     string
-	Capacity *Duration
+	// End is the iteration end time.
+	End time.Time
 
-	// Content
+	// Tasks is an ordered list of canonical task paths.
+	Tasks []CanonicalPath
+
+	// Body is the markdown content after front matter.
 	Body string
+}
+
+// DeriveStatus returns the iteration status based on the current time.
+// - "todo" if now < start
+// - "in_progress" if start <= now <= end
+// - "done" if now > end
+func (it *Iteration) DeriveStatus(now time.Time) StatusCategory {
+	if now.Before(it.Start) {
+		return StatusTodo
+	}
+	if now.After(it.End) {
+		return StatusDone
+	}
+	return StatusInProgress
 }

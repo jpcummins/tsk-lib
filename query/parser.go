@@ -1,13 +1,16 @@
 package query
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
-// Parser turns a DSL query string into a validated AST.
+// Parser parses a query string into an AST.
 type Parser interface {
 	Parse(input string) (Expr, error)
 }
 
-// DefaultParser is the standard recursive-descent parser.
+// DefaultParser implements the recursive descent parser.
 type DefaultParser struct{}
 
 // NewParser creates a new DefaultParser.
@@ -15,11 +18,16 @@ func NewParser() *DefaultParser {
 	return &DefaultParser{}
 }
 
-// Parse tokenizes the input and produces an AST.
+// Parse tokenizes and parses the input string into an AST.
 func (p *DefaultParser) Parse(input string) (Expr, error) {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return nil, fmt.Errorf("empty expression")
+	}
+
 	tokens, err := Lex(input)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("lexer error: %w", err)
 	}
 
 	parser := &parser{tokens: tokens, pos: 0}
@@ -28,10 +36,9 @@ func (p *DefaultParser) Parse(input string) (Expr, error) {
 		return nil, err
 	}
 
-	// Ensure we consumed all tokens.
 	if parser.current().Type != TokenEOF {
 		return nil, fmt.Errorf("unexpected token %q at position %d",
-			parser.current().Literal, parser.current().Pos)
+			parser.current().Value, parser.current().Pos)
 	}
 
 	return expr, nil
@@ -44,44 +51,46 @@ type parser struct {
 }
 
 func (p *parser) current() Token {
-	if p.pos >= len(p.tokens) {
-		return Token{Type: TokenEOF}
+	if p.pos < len(p.tokens) {
+		return p.tokens[p.pos]
 	}
-	return p.tokens[p.pos]
+	return Token{Type: TokenEOF}
 }
 
 func (p *parser) advance() Token {
-	t := p.current()
-	p.pos++
-	return t
+	tok := p.current()
+	if p.pos < len(p.tokens) {
+		p.pos++
+	}
+	return tok
 }
 
 func (p *parser) expect(typ TokenType) (Token, error) {
-	t := p.current()
-	if t.Type != typ {
-		return t, fmt.Errorf("expected %s, got %s (%q) at position %d",
-			typ, t.Type, t.Literal, t.Pos)
+	tok := p.current()
+	if tok.Type != typ {
+		return tok, fmt.Errorf("expected %s, got %s %q at position %d",
+			typ, tok.Type, tok.Value, tok.Pos)
 	}
-	p.pos++
-	return t, nil
+	p.advance()
+	return tok, nil
 }
 
-// parseExpr handles: term ( ("AND" | "OR") term )*
-// Precedence: NOT > AND > OR, so we split into parseOrExpr and parseAndExpr.
+// parseExpr: expr = term ((AND | OR) term)*
+// Precedence: NOT > AND > OR, so we parse OR at the top level.
 func (p *parser) parseExpr() (Expr, error) {
-	return p.parseOrExpr()
+	return p.parseOr()
 }
 
-// parseOrExpr handles: andExpr ( "OR" andExpr )*
-func (p *parser) parseOrExpr() (Expr, error) {
-	left, err := p.parseAndExpr()
+// parseOr: or_expr = and_expr (OR and_expr)*
+func (p *parser) parseOr() (Expr, error) {
+	left, err := p.parseAnd()
 	if err != nil {
 		return nil, err
 	}
 
 	for p.current().Type == TokenOR {
 		p.advance()
-		right, err := p.parseAndExpr()
+		right, err := p.parseAnd()
 		if err != nil {
 			return nil, err
 		}
@@ -91,8 +100,8 @@ func (p *parser) parseOrExpr() (Expr, error) {
 	return left, nil
 }
 
-// parseAndExpr handles: unaryExpr ( "AND" unaryExpr )*
-func (p *parser) parseAndExpr() (Expr, error) {
+// parseAnd: and_expr = unary (AND unary)*
+func (p *parser) parseAnd() (Expr, error) {
 	left, err := p.parseUnary()
 	if err != nil {
 		return nil, err
@@ -110,96 +119,87 @@ func (p *parser) parseAndExpr() (Expr, error) {
 	return left, nil
 }
 
-// parseUnary handles: "NOT"? primary
+// parseUnary: unary = NOT unary | primary
 func (p *parser) parseUnary() (Expr, error) {
 	if p.current().Type == TokenNOT {
 		p.advance()
-		operand, err := p.parseUnary()
+		expr, err := p.parseUnary()
 		if err != nil {
 			return nil, err
 		}
-		return &UnaryExpr{Op: TokenNOT, Operand: operand}, nil
+		return &UnaryExpr{Op: TokenNOT, Expr: expr}, nil
 	}
 
 	return p.parsePrimary()
 }
 
-// parsePrimary handles: predicate | funcCall | "(" expr ")"
+// parsePrimary: primary = grouped | func_call | predicate
 func (p *parser) parsePrimary() (Expr, error) {
-	tok := p.current()
-
-	// Grouped expression.
-	if tok.Type == TokenLParen {
+	// Grouped expression
+	if p.current().Type == TokenLParen {
 		p.advance()
 		expr, err := p.parseExpr()
 		if err != nil {
 			return nil, err
 		}
 		if _, err := p.expect(TokenRParen); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("unmatched parenthesis: %w", err)
 		}
 		return expr, nil
 	}
 
-	// Identifier — could be a field (predicate) or function call.
-	if tok.Type == TokenIdent {
-		// Look ahead: is this a function call?
-		if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Type == TokenLParen {
-			return p.parseFuncCall()
-		}
-
-		// Otherwise it's a predicate: field op value
-		return p.parsePredicate()
+	// Must be an identifier (field name or function name)
+	if p.current().Type != TokenIdent {
+		return nil, fmt.Errorf("expected field name or function, got %s %q at position %d",
+			p.current().Type, p.current().Value, p.current().Pos)
 	}
 
-	return nil, fmt.Errorf("unexpected token %s (%q) at position %d, expected predicate or '('",
-		tok.Type, name(tok), tok.Pos)
-}
+	ident := p.advance()
 
-// parsePredicate handles: field op value
-func (p *parser) parsePredicate() (Expr, error) {
-	fieldTok := p.advance()
-	field := fieldTok.Literal
-
-	opTok := p.current()
-	if !isOperator(opTok.Type) {
-		return nil, fmt.Errorf("expected operator after %q, got %s (%q) at position %d",
-			field, opTok.Type, name(opTok), opTok.Pos)
-	}
-	p.advance()
-
-	// IN expects a list or value.
-	if opTok.Type == TokenIN {
-		val, err := p.parseValue()
-		if err != nil {
-			return nil, fmt.Errorf("parsing IN value for %q: %w", field, err)
-		}
-		return &Predicate{Field: field, Op: opTok.Type, Value: val}, nil
+	// Check if it's a function call: ident(
+	if p.current().Type == TokenLParen {
+		return p.parseFuncCall(ident.Value)
 	}
 
+	// It's a field name. Could have a dot-qualified part remaining in the ident
+	// (since our lexer treats dots as ident parts).
+	field := ident.Value
+
+	// Parse operator
+	op := p.current()
+	switch op.Type {
+	case TokenEQ, TokenNEQ, TokenLT, TokenLTE, TokenGT, TokenGTE, TokenTilde, TokenIN:
+		p.advance()
+	default:
+		return nil, fmt.Errorf("expected operator, got %s %q at position %d",
+			op.Type, op.Value, op.Pos)
+	}
+
+	// Parse value
 	val, err := p.parseValue()
 	if err != nil {
-		return nil, fmt.Errorf("parsing value for %q: %w", field, err)
+		return nil, err
 	}
 
-	return &Predicate{Field: field, Op: opTok.Type, Value: val}, nil
+	return &Predicate{
+		Field: field,
+		Op:    op.Type,
+		Value: val,
+	}, nil
 }
 
-// parseFuncCall handles: ident "(" [args] ")"
-func (p *parser) parseFuncCall() (Expr, error) {
-	nameTok := p.advance() // function name
-	p.advance()            // skip "("
+// parseFuncCall parses a function call: name(args...)
+func (p *parser) parseFuncCall(name string) (Expr, error) {
+	p.advance() // skip (
 
 	var args []Value
-
 	if p.current().Type != TokenRParen {
 		for {
-			val, err := p.parseValue()
+			val, err := p.parseFuncArg()
 			if err != nil {
-				return nil, fmt.Errorf("parsing argument for %s(): %w", nameTok.Literal, err)
+				return nil, err
 			}
 			args = append(args, val)
-
 			if p.current().Type != TokenComma {
 				break
 			}
@@ -208,65 +208,70 @@ func (p *parser) parseFuncCall() (Expr, error) {
 	}
 
 	if _, err := p.expect(TokenRParen); err != nil {
-		return nil, fmt.Errorf("expected ')' after %s() arguments: %w", nameTok.Literal, err)
+		return nil, fmt.Errorf("expected ) for function %s: %w", name, err)
 	}
 
-	return &FuncCall{Name: nameTok.Literal, Args: args}, nil
+	return &FuncCall{Name: name, Args: args}, nil
 }
 
-// parseValue parses a literal value or list.
+// parseFuncArg parses a function argument — either a value or an unquoted identifier (field name).
+func (p *parser) parseFuncArg() (Value, error) {
+	tok := p.current()
+
+	switch tok.Type {
+	case TokenString:
+		p.advance()
+		return &StringValue{Val: tok.Value}, nil
+	case TokenNumber:
+		p.advance()
+		return &NumberValue{Val: tok.Value}, nil
+	case TokenIdent:
+		p.advance()
+		return &IdentValue{Name: tok.Value}, nil
+	default:
+		return nil, fmt.Errorf("expected function argument, got %s %q at position %d",
+			tok.Type, tok.Value, tok.Pos)
+	}
+}
+
+// parseValue parses a value expression on the right side of an operator.
 func (p *parser) parseValue() (Value, error) {
 	tok := p.current()
 
 	switch tok.Type {
 	case TokenString:
 		p.advance()
-		return StringValue{Val: tok.Literal}, nil
+		return &StringValue{Val: tok.Value}, nil
 
 	case TokenNumber:
 		p.advance()
-		return NumberValue{Val: tok.Literal}, nil
-
-	case TokenDate:
-		p.advance()
-		return DateValue{Val: tok.Literal}, nil
-
-	case TokenDuration:
-		p.advance()
-		return DurationValue{Val: tok.Literal}, nil
-
-	case TokenIdent:
-		// Could be a bare identifier used as a value (e.g., "done", "in_progress")
-		// or a function call in value position (e.g., team("backend"), me(), date("today")).
-		if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Type == TokenLParen {
-			fc, err := p.parseFuncCallValue()
-			if err != nil {
-				return nil, err
-			}
-			return fc, nil
-		}
-		p.advance()
-		return IdentValue{Val: tok.Literal}, nil
+		return &NumberValue{Val: tok.Value}, nil
 
 	case TokenLBrack:
 		return p.parseList()
 
+	case TokenIdent:
+		// Could be a function call in value position: func(args...)
+		p.advance()
+		if p.current().Type == TokenLParen {
+			return p.parseValueFuncCall(tok.Value)
+		}
+		return &IdentValue{Name: tok.Value}, nil
+
 	default:
-		return nil, fmt.Errorf("expected value, got %s (%q) at position %d",
-			tok.Type, name(tok), tok.Pos)
+		return nil, fmt.Errorf("expected value, got %s %q at position %d",
+			tok.Type, tok.Value, tok.Pos)
 	}
 }
 
-// parseFuncCallValue parses a function call in value position.
-func (p *parser) parseFuncCallValue() (Value, error) {
-	nameTok := p.advance() // function name
-	p.advance()            // skip "("
+// parseValueFuncCall parses a function call in value position.
+func (p *parser) parseValueFuncCall(name string) (Value, error) {
+	p.advance() // skip (
 
 	var args []Value
-
 	if p.current().Type != TokenRParen {
 		for {
-			val, err := p.parseValue()
+			val, err := p.parseFuncArg()
 			if err != nil {
 				return nil, err
 			}
@@ -279,49 +284,31 @@ func (p *parser) parseFuncCallValue() (Value, error) {
 	}
 
 	if _, err := p.expect(TokenRParen); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("expected ) for function %s: %w", name, err)
 	}
 
-	return FuncValue{Call: &FuncCall{Name: nameTok.Literal, Args: args}}, nil
+	return &FuncValue{Name: name, Args: args}, nil
 }
 
-// parseList handles: "[" value ("," value)* "]"
+// parseList parses a list literal: [val1, val2, ...]
 func (p *parser) parseList() (Value, error) {
-	p.advance() // skip "["
-	var items []Value
+	p.advance() // skip [
 
-	if p.current().Type != TokenRBrack {
-		for {
-			val, err := p.parseValue()
-			if err != nil {
-				return nil, err
-			}
-			items = append(items, val)
-			if p.current().Type != TokenComma {
-				break
-			}
+	var values []Value
+	for p.current().Type != TokenRBrack {
+		val, err := p.parseValue()
+		if err != nil {
+			return nil, err
+		}
+		values = append(values, val)
+		if p.current().Type == TokenComma {
 			p.advance()
 		}
 	}
 
 	if _, err := p.expect(TokenRBrack); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("expected ]: %w", err)
 	}
 
-	return ListValue{Items: items}, nil
-}
-
-func isOperator(t TokenType) bool {
-	switch t {
-	case TokenEQ, TokenNEQ, TokenLT, TokenLTE, TokenGT, TokenGTE, TokenTilde, TokenIN:
-		return true
-	}
-	return false
-}
-
-func name(t Token) string {
-	if t.Literal != "" {
-		return t.Literal
-	}
-	return t.Type.String()
+	return &ListValue{Values: values}, nil
 }

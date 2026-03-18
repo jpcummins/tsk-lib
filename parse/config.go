@@ -1,157 +1,151 @@
 package parse
 
 import (
-	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/BurntSushi/toml"
 	"github.com/jpcummins/tsk-lib/model"
-	"github.com/jpcummins/tsk-lib/scan"
 )
 
-// rawConfig is the TOML structure for .config.toml files.
+// rawConfig is the TOML representation of a config.toml file.
 type rawConfig struct {
-	Version   string              `toml:"version"`
-	Defaults  rawDefaults         `toml:"defaults"`
-	Inherit   rawInherit          `toml:"inherit"`
-	Status    rawStatusSection    `toml:"status"`
-	Iteration rawIterationSection `toml:"iteration"`
+	Version string `toml:"version"`
+	Status  struct {
+		Map map[string]rawStatusEntry `toml:"map"`
+	} `toml:"status"`
 }
 
-type rawDefaults struct {
-	Assignee string `toml:"assignee"`
-	Status   string `toml:"status"`
-	Estimate string `toml:"estimate"`
-}
-
-type rawInherit struct {
-	Assignee bool `toml:"assignee"`
-	Status   bool `toml:"status"`
-	Estimate bool `toml:"estimate"`
-}
-
-type rawStatusSection struct {
-	Map map[string]rawStatusEntry `toml:"map"`
-}
-
-type rawIterationSection struct {
-	Status rawStatusSection `toml:"status"`
-}
-
+// rawStatusEntry is the TOML representation of a status map entry.
 type rawStatusEntry struct {
 	Category string `toml:"category"`
 	Order    int    `toml:"order"`
 }
 
-// rawTeamConfig is the TOML structure for team.toml files.
+// rawTeamConfig is the TOML representation of a team.toml file.
 type rawTeamConfig struct {
-	Members   []string            `toml:"members"`
-	Iteration rawIterationSection `toml:"iteration"`
+	Members map[string]string `toml:"members"`
 }
 
-// rawSLAConfig is the TOML structure for sla.toml files.
-type rawSLAConfig struct {
+// rawSLAFile is the TOML representation of an sla.toml file.
+type rawSLAFile struct {
 	Rule []rawSLARule `toml:"rule"`
 }
 
+// rawSLARule is the TOML representation of an SLA rule.
 type rawSLARule struct {
 	ID       string `toml:"id"`
 	Name     string `toml:"name"`
 	Query    string `toml:"query"`
 	Target   string `toml:"target"`
+	WarnAt   string `toml:"warn_at"`
 	Start    string `toml:"start"`
 	Stop     string `toml:"stop"`
 	Severity string `toml:"severity"`
 }
 
-// parseConfig converts a scanned config entry into a model.Config.
-func parseConfig(entry scan.Entry) (*model.Config, error) {
+// parseConfig parses a config.toml file.
+func parseConfig(data []byte, path string) (*model.Config, error) {
 	var raw rawConfig
-	if err := toml.Unmarshal(entry.Content, &raw); err != nil {
-		return nil, fmt.Errorf("parsing config %s: %w", entry.Path, err)
+	if err := toml.Unmarshal(data, &raw); err != nil {
+		return nil, err
 	}
 
 	cfg := &model.Config{
-		Path:    entry.Path,
-		Version: raw.Version,
-		Defaults: model.Defaults{
-			Assignee: raw.Defaults.Assignee,
-			Status:   raw.Defaults.Status,
-			Estimate: raw.Defaults.Estimate,
-		},
-		Inherit: model.Inherit{
-			Assignee: raw.Inherit.Assignee,
-			Status:   raw.Inherit.Status,
-			Estimate: raw.Inherit.Estimate,
-		},
-		StatusMap:          convertStatusMap(raw.Status.Map),
-		IterationStatusMap: convertStatusMap(raw.Iteration.Status.Map),
+		Path: model.CanonicalPath(path),
+	}
+
+	// Version is only valid at root
+	isRoot := path == "" || path == "config.toml"
+	if isRoot {
+		cfg.Version = raw.Version
+	}
+
+	// Parse status map
+	if raw.Status.Map != nil {
+		cfg.StatusMap = make(model.StatusMap, len(raw.Status.Map))
+		for name, entry := range raw.Status.Map {
+			cfg.StatusMap[name] = model.StatusEntry{
+				Category: model.StatusCategory(entry.Category),
+				Order:    entry.Order,
+			}
+		}
 	}
 
 	return cfg, nil
 }
 
-// parseTeamConfig converts a scanned team.toml entry into a model.Team.
-func parseTeamConfig(entry scan.Entry) (*model.Team, error) {
+// parseTeamConfig parses a team.toml file.
+func parseTeamConfig(data []byte, teamName string) (*model.Team, error) {
 	var raw rawTeamConfig
-	if err := toml.Unmarshal(entry.Content, &raw); err != nil {
-		return nil, fmt.Errorf("parsing team config %s: %w", entry.Path, err)
-	}
-
-	// Derive team name from path: teams/<team>/team.toml
-	parts := strings.Split(entry.Path, "/")
-	teamName := ""
-	if len(parts) >= 2 {
-		teamName = parts[1]
+	if err := toml.Unmarshal(data, &raw); err != nil {
+		return nil, err
 	}
 
 	team := &model.Team{
-		Name:               teamName,
-		IterationStatusMap: convertStatusMap(raw.Iteration.Status.Map),
+		Name:    teamName,
+		Members: make(map[string]model.TeamMember, len(raw.Members)),
 	}
 
-	// Parse members: "First Last <email@example.com>"
-	for _, m := range raw.Members {
-		member := parseTeamMember(m)
-		team.Members = append(team.Members, member)
+	for id, value := range raw.Members {
+		member := model.TeamMember{
+			Identifier: id,
+			Value:      value,
+		}
+
+		// Parse "First Last <email>" format
+		name, email := parseMemberValue(value)
+		member.Name = name
+		member.Email = email
+
+		team.Members[id] = member
 	}
 
 	return team, nil
 }
 
-// memberEmailRe extracts email from "Name <email>" format.
-var memberEmailRe = regexp.MustCompile(`<([^>]+)>`)
+// parseMemberValue parses member value formats:
+// - "First Last <email@example.com>"
+// - "First Last"
+// - "email@example.com"
+func parseMemberValue(value string) (name, email string) {
+	value = strings.TrimSpace(value)
 
-// parseTeamMember parses "First Last <email@example.com>" into a TeamMember.
-func parseTeamMember(raw string) model.TeamMember {
-	member := model.TeamMember{Display: raw}
-
-	matches := memberEmailRe.FindStringSubmatch(raw)
-	if len(matches) == 2 {
-		member.Email = matches[1]
-		member.Name = strings.TrimSpace(strings.Replace(raw, matches[0], "", 1))
-	} else {
-		member.Name = raw
+	// Check for "Name <email>" format
+	if idx := strings.Index(value, "<"); idx >= 0 {
+		name = strings.TrimSpace(value[:idx])
+		end := strings.Index(value, ">")
+		if end > idx {
+			email = value[idx+1 : end]
+		}
+		return
 	}
 
-	return member
+	// Check if it's an email
+	if strings.Contains(value, "@") {
+		email = value
+		return
+	}
+
+	// Otherwise it's just a name
+	name = value
+	return
 }
 
-// parseSLARules converts sla.toml content into SLA rules.
-func parseSLARules(entry scan.Entry) ([]*model.SLARule, error) {
-	var raw rawSLAConfig
-	if err := toml.Unmarshal(entry.Content, &raw); err != nil {
-		return nil, fmt.Errorf("parsing sla.toml: %w", err)
+// parseSLAFile parses an sla.toml file.
+func parseSLAFile(data []byte) ([]*model.SLARule, error) {
+	var raw rawSLAFile
+	if err := toml.Unmarshal(data, &raw); err != nil {
+		return nil, err
 	}
 
-	var rules []*model.SLARule
+	rules := make([]*model.SLARule, 0, len(raw.Rule))
 	for _, r := range raw.Rule {
 		target, err := model.ParseDuration(r.Target)
 		if err != nil {
-			return nil, fmt.Errorf("parsing SLA rule %q target: %w", r.ID, err)
+			return nil, err
 		}
-		rules = append(rules, &model.SLARule{
+
+		rule := &model.SLARule{
 			ID:       r.ID,
 			Name:     r.Name,
 			Query:    r.Query,
@@ -159,23 +153,18 @@ func parseSLARules(entry scan.Entry) ([]*model.SLARule, error) {
 			Start:    r.Start,
 			Stop:     r.Stop,
 			Severity: r.Severity,
-		})
+		}
+
+		if r.WarnAt != "" {
+			warnAt, err := model.ParseDuration(r.WarnAt)
+			if err != nil {
+				return nil, err
+			}
+			rule.WarnAt = &warnAt
+		}
+
+		rules = append(rules, rule)
 	}
 
 	return rules, nil
-}
-
-// convertStatusMap converts raw TOML status entries into a model.StatusMap.
-func convertStatusMap(raw map[string]rawStatusEntry) model.StatusMap {
-	if len(raw) == 0 {
-		return nil
-	}
-	sm := make(model.StatusMap, len(raw))
-	for name, entry := range raw {
-		sm[name] = model.StatusEntry{
-			Category: model.StatusCategory(entry.Category),
-			Order:    entry.Order,
-		}
-	}
-	return sm
 }
