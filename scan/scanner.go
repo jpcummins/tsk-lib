@@ -133,11 +133,6 @@ func classify(rel string) (EntryKind, bool) {
 	if len(parts) >= 2 && parts[0] == "tasks" {
 		name := parts[len(parts)-1]
 
-		// config.toml within tasks/ is a project config
-		if name == "config.toml" {
-			return EntryProjectConfig, true
-		}
-
 		// .md files are tasks
 		if strings.HasSuffix(name, ".md") {
 			return EntryTask, true

@@ -90,88 +90,19 @@ func resolveHierarchy(repo *model.Repository) {
 	}
 }
 
-// resolveStatusCategories resolves custom status values to base categories
-// using the config inheritance chain.
+// resolveStatusCategories resolves status values to categories.
+// Status must be one of the base categories: icebox, todo, in_progress, done.
 func resolveStatusCategories(repo *model.Repository) {
-	// Build merged status map per scope
-	statusMaps := buildStatusMapChain(repo.Configs)
-
 	for _, task := range repo.Tasks {
 		if task.IsStub || task.Status == "" {
 			continue
 		}
 
-		// Find the most specific status map for this task's path
-		statusMap := findStatusMap(statusMaps, task.Path)
-		if statusMap != nil {
-			category := statusMap.Resolve(task.Status)
-			if category != "" {
-				task.Category = category
-			}
-		}
-
-		// If no mapping found, check if status is a base category directly
-		if task.Category == "" {
-			switch model.StatusCategory(task.Status) {
-			case model.StatusIcebox, model.StatusTodo, model.StatusInProgress, model.StatusDone:
-				task.Category = model.StatusCategory(task.Status)
-			}
+		switch model.StatusCategory(task.Status) {
+		case model.StatusIcebox, model.StatusTodo, model.StatusInProgress, model.StatusDone:
+			task.Category = model.StatusCategory(task.Status)
 		}
 	}
-}
-
-// buildStatusMapChain builds a chain of merged status maps from configs.
-type scopedStatusMap struct {
-	path      model.CanonicalPath
-	statusMap model.StatusMap
-}
-
-func buildStatusMapChain(configs []*model.Config) []scopedStatusMap {
-	// Sort configs by path depth (root first)
-	sorted := make([]*model.Config, len(configs))
-	copy(sorted, configs)
-	sort.Slice(sorted, func(i, j int) bool {
-		return sorted[i].Path.Depth() < sorted[j].Path.Depth()
-	})
-
-	var chain []scopedStatusMap
-	var merged model.StatusMap
-
-	for _, cfg := range sorted {
-		if cfg.StatusMap == nil {
-			continue
-		}
-		if merged == nil {
-			merged = cfg.StatusMap
-		} else {
-			merged = merged.Merge(cfg.StatusMap)
-		}
-		chain = append(chain, scopedStatusMap{
-			path:      cfg.Path,
-			statusMap: copyStatusMap(merged),
-		})
-	}
-
-	return chain
-}
-
-func copyStatusMap(m model.StatusMap) model.StatusMap {
-	result := make(model.StatusMap, len(m))
-	for k, v := range m {
-		result[k] = v
-	}
-	return result
-}
-
-func findStatusMap(chain []scopedStatusMap, taskPath model.CanonicalPath) model.StatusMap {
-	// Find the most specific (deepest) map that applies to this task
-	var best model.StatusMap
-	for _, s := range chain {
-		if s.path.IsEmpty() || taskPath.HasPrefix(s.path) {
-			best = s.statusMap
-		}
-	}
-	return best
 }
 
 // AssigneeResult holds the resolved assignee type and value.

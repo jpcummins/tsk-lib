@@ -109,9 +109,8 @@ type Expect struct {
 	AppliedRuleIDs []string `toml:"applied_rule_ids"`
 
 	// parse_config
-	Version        string                         `toml:"version"`
-	VersionIgnored *bool                          `toml:"version_ignored"`
-	StatusMap      map[string]StatusEntryExpected `toml:"status_map"`
+	Version        string `toml:"version"`
+	VersionIgnored *bool  `toml:"version_ignored"`
 
 	// resolve_assignee
 	Type  string `toml:"type"`
@@ -122,12 +121,6 @@ type Expect struct {
 	VirtualNodes []string            `toml:"virtual_nodes"`
 	Teams        []string            `toml:"teams"`
 	TasksByTeam  map[string][]string `toml:"tasks_by_team"`
-}
-
-// StatusEntryExpected represents an expected status map entry.
-type StatusEntryExpected struct {
-	Category string `toml:"category"`
-	Order    int    `toml:"order"`
 }
 
 // DiagExpect represents an expected diagnostic (warning or error).

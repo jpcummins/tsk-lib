@@ -4,17 +4,16 @@ package sql
 // fieldMapping maps DSL field names to SQL column expressions.
 var fieldMapping = map[string]string{
 	// Task fields
-	"task.status":          "t.status",
-	"task.status.category": "t.status_category",
-	"task.assignee":        "t.assignee",
-	"task.due":             "t.due",
-	"task.created_at":      "t.created_at",
-	"task.updated_at":      "t.updated_at",
-	"task.estimate":        "t.estimate",
-	"task.path":            "t.path",
-	"task.summary":         "t.summary",
-	"task.type":            "t.type",
-	"task.weight":          "t.weight",
+	"task.status":     "t.status",
+	"task.assignee":   "t.assignee",
+	"task.due":        "t.due",
+	"task.created_at": "t.created_at",
+	"task.updated_at": "t.updated_at",
+	"task.estimate":   "t.estimate",
+	"task.path":       "t.path",
+	"task.summary":    "t.summary",
+	"task.type":       "t.type",
+	"task.weight":     "t.weight",
 
 	// Iteration fields
 	"iteration.id":    "i.id",

@@ -14,9 +14,6 @@ type Repository struct {
 	// Teams maps team names to team definitions.
 	Teams map[string]*Team
 
-	// Configs is the chain of parsed configs (root first, most specific last).
-	Configs []*Config
-
 	// SLARules contains all parsed SLA rules.
 	SLARules []*SLARule
 

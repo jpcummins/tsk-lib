@@ -72,17 +72,6 @@ func (p *DefaultParser) parseFiles(entries []scan.Entry, repo *model.Repository)
 				return fmt.Errorf("parsing root config: %w", err)
 			}
 			repo.Version = cfg.Version
-			repo.Configs = append(repo.Configs, cfg)
-
-		case scan.EntryProjectConfig:
-			// Path like "tasks/project/config.toml" -> config path "project"
-			path := strings.TrimPrefix(entry.Path, "tasks/")
-			path = strings.TrimSuffix(path, "/config.toml")
-			cfg, err := parseConfig(entry.Content, path)
-			if err != nil {
-				return fmt.Errorf("parsing config %s: %w", entry.Path, err)
-			}
-			repo.Configs = append(repo.Configs, cfg)
 
 		case scan.EntryTeamConfig:
 			// Path like "teams/backend/team.toml" -> team name "backend"

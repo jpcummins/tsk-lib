@@ -14,7 +14,6 @@ CREATE TABLE IF NOT EXISTS tasks (
 	summary TEXT,
 	estimate TEXT,
 	status TEXT,
-	status_category TEXT,
 	updated_at TEXT,
 	type TEXT,
 	weight REAL,
@@ -101,7 +100,6 @@ CREATE TABLE IF NOT EXISTS repository_meta (
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_assignee ON tasks(assignee);
 CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent);
-CREATE INDEX IF NOT EXISTS idx_tasks_category ON tasks(status_category);
 CREATE INDEX IF NOT EXISTS idx_labels_task ON task_labels(task_path);
 CREATE INDEX IF NOT EXISTS idx_labels_value ON task_labels(value);
 CREATE INDEX IF NOT EXISTS idx_deps_task ON task_dependencies(task_path);

@@ -193,8 +193,6 @@ func getTaskFieldValue(field string, task *model.Task) fieldValue {
 	switch field {
 	case "task.status":
 		return fieldValue{isSet: task.Status != "", str: task.Status}
-	case "task.status.category":
-		return fieldValue{isSet: task.Category != "", str: string(task.Category)}
 	case "task.assignee":
 		return fieldValue{isSet: task.Assignee != "", str: task.Assignee}
 	case "task.summary":

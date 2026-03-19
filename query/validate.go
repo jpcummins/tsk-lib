@@ -29,19 +29,18 @@ type fieldInfo struct {
 // knownFields maps qualified field names to their type info.
 var knownFields = map[string]fieldInfo{
 	// Task fields
-	"task.status":          {Namespace: "task", Name: "status", Type: FieldEnum},
-	"task.status.category": {Namespace: "task", Name: "status.category", Type: FieldEnum},
-	"task.assignee":        {Namespace: "task", Name: "assignee", Type: FieldString},
-	"task.due":             {Namespace: "task", Name: "due", Type: FieldDatetime},
-	"task.created_at":      {Namespace: "task", Name: "created_at", Type: FieldDatetime},
-	"task.updated_at":      {Namespace: "task", Name: "updated_at", Type: FieldDatetime},
-	"task.estimate":        {Namespace: "task", Name: "estimate", Type: FieldDuration},
-	"task.path":            {Namespace: "task", Name: "path", Type: FieldString},
-	"task.summary":         {Namespace: "task", Name: "summary", Type: FieldString},
-	"task.type":            {Namespace: "task", Name: "type", Type: FieldString},
-	"task.dependencies":    {Namespace: "task", Name: "dependencies", Type: FieldList},
-	"task.labels":          {Namespace: "task", Name: "labels", Type: FieldList},
-	"task.weight":          {Namespace: "task", Name: "weight", Type: FieldNumber},
+	"task.status":       {Namespace: "task", Name: "status", Type: FieldEnum},
+	"task.assignee":     {Namespace: "task", Name: "assignee", Type: FieldString},
+	"task.due":          {Namespace: "task", Name: "due", Type: FieldDatetime},
+	"task.created_at":   {Namespace: "task", Name: "created_at", Type: FieldDatetime},
+	"task.updated_at":   {Namespace: "task", Name: "updated_at", Type: FieldDatetime},
+	"task.estimate":     {Namespace: "task", Name: "estimate", Type: FieldDuration},
+	"task.path":         {Namespace: "task", Name: "path", Type: FieldString},
+	"task.summary":      {Namespace: "task", Name: "summary", Type: FieldString},
+	"task.type":         {Namespace: "task", Name: "type", Type: FieldString},
+	"task.dependencies": {Namespace: "task", Name: "dependencies", Type: FieldList},
+	"task.labels":       {Namespace: "task", Name: "labels", Type: FieldList},
+	"task.weight":       {Namespace: "task", Name: "weight", Type: FieldNumber},
 
 	// Iteration fields
 	"iteration.id":    {Namespace: "iteration", Name: "id", Type: FieldString},

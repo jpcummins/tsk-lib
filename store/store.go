@@ -129,11 +129,11 @@ func (s *SQLiteStore) WriteRepository(ctx context.Context, repo *model.Repositor
 		}
 
 		_, err := tx.ExecContext(ctx, `INSERT INTO tasks (path, parent, is_readme, is_stub, redirect_to,
-			created_at, due, assignee, summary, estimate, status, status_category,
-			updated_at, type, weight, body) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			created_at, due, assignee, summary, estimate, status,
+			updated_at, type, weight, body) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			string(task.Path), string(task.Parent), task.IsReadme, task.IsStub,
 			string(task.RedirectTo), createdAt, due, task.Assignee, task.Summary,
-			estimate, task.Status, string(task.Category), updatedAt,
+			estimate, task.Status, updatedAt,
 			task.Type, task.Weight, task.Body)
 		if err != nil {
 			return fmt.Errorf("writing task %s: %w", task.Path, err)
@@ -211,7 +211,7 @@ func (s *SQLiteStore) WriteRepository(ctx context.Context, repo *model.Repositor
 func (s *SQLiteStore) TaskByPath(ctx context.Context, path model.CanonicalPath) (*model.Task, error) {
 	ctx = contextOrBackground(ctx)
 
-	row := s.db.QueryRowContext(ctx, "SELECT path, parent, is_readme, is_stub, redirect_to, created_at, due, assignee, summary, estimate, status, status_category, updated_at, type, weight, body FROM tasks WHERE path = ?", string(path))
+	row := s.db.QueryRowContext(ctx, "SELECT path, parent, is_readme, is_stub, redirect_to, created_at, due, assignee, summary, estimate, status, updated_at, type, weight, body FROM tasks WHERE path = ?", string(path))
 	task, err := scanTask(row)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -226,7 +226,7 @@ func (s *SQLiteStore) TaskByPath(ctx context.Context, path model.CanonicalPath) 
 func (s *SQLiteStore) AllTasks(ctx context.Context) ([]*model.Task, error) {
 	ctx = contextOrBackground(ctx)
 
-	rows, err := s.db.QueryContext(ctx, "SELECT path, parent, is_readme, is_stub, redirect_to, created_at, due, assignee, summary, estimate, status, status_category, updated_at, type, weight, body FROM tasks WHERE is_stub = 0")
+	rows, err := s.db.QueryContext(ctx, "SELECT path, parent, is_readme, is_stub, redirect_to, created_at, due, assignee, summary, estimate, status, updated_at, type, weight, body FROM tasks WHERE is_stub = 0")
 	if err != nil {
 		return nil, err
 	}
@@ -402,12 +402,12 @@ func scanTask(row *sql.Row) (*model.Task, error) {
 
 func scanTaskRow(rows *sql.Rows) (*model.Task, error) {
 	var task model.Task
-	var parent, redirectTo, createdAt, due, updatedAt, estimate, category sql.NullString
+	var parent, redirectTo, createdAt, due, updatedAt, estimate sql.NullString
 	var weight sql.NullFloat64
 
 	err := rows.Scan(&task.Path, &parent, &task.IsReadme, &task.IsStub, &redirectTo,
 		&createdAt, &due, &task.Assignee, &task.Summary, &estimate,
-		&task.Status, &category, &updatedAt, &task.Type, &weight, &task.Body)
+		&task.Status, &updatedAt, &task.Type, &weight, &task.Body)
 	if err != nil {
 		return nil, err
 	}
@@ -417,9 +417,6 @@ func scanTaskRow(rows *sql.Rows) (*model.Task, error) {
 	}
 	if redirectTo.Valid {
 		task.RedirectTo = model.CanonicalPath(redirectTo.String)
-	}
-	if category.Valid {
-		task.Category = model.StatusCategory(category.String)
 	}
 	if weight.Valid {
 		task.Weight = &weight.Float64

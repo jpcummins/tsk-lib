@@ -73,8 +73,6 @@ func (t *Task) HasField(field string) bool {
 		return t.Estimate != nil
 	case "status":
 		return t.Status != ""
-	case "status.category":
-		return t.Category != ""
 	case "updated_at":
 		return t.UpdatedAt != nil
 	case "change_log":

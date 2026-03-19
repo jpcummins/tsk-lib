@@ -214,32 +214,6 @@ func runParseConfig(t *testing.T, tc conformance.TestCase) {
 		}
 	}
 
-	// Check status map
-	if tc.Expect.StatusMap != nil {
-		// Find the config for the given path
-		var cfg *model.Config
-		for _, c := range repo.Configs {
-			cfg = c
-		}
-		if cfg == nil {
-			t.Fatal("no config found")
-		}
-
-		for name, expected := range tc.Expect.StatusMap {
-			got, ok := cfg.StatusMap[name]
-			if !ok {
-				t.Errorf("status map missing entry %q", name)
-				continue
-			}
-			if string(got.Category) != expected.Category {
-				t.Errorf("status_map[%q].category = %q, want %q", name, got.Category, expected.Category)
-			}
-			if got.Order != expected.Order {
-				t.Errorf("status_map[%q].order = %d, want %d", name, got.Order, expected.Order)
-			}
-		}
-	}
-
 	checkDiagnostics(t, repo.Diagnostics, tc.Warnings, tc.Errors)
 }
 

@@ -10,15 +10,6 @@ import (
 // rawConfig is the TOML representation of a config.toml file.
 type rawConfig struct {
 	Version string `toml:"version"`
-	Status  struct {
-		Map map[string]rawStatusEntry `toml:"map"`
-	} `toml:"status"`
-}
-
-// rawStatusEntry is the TOML representation of a status map entry.
-type rawStatusEntry struct {
-	Category string `toml:"category"`
-	Order    int    `toml:"order"`
 }
 
 // rawTeamConfig is the TOML representation of a team.toml file.
@@ -58,17 +49,6 @@ func parseConfig(data []byte, path string) (*model.Config, error) {
 	isRoot := path == "" || path == "config.toml"
 	if isRoot {
 		cfg.Version = raw.Version
-	}
-
-	// Parse status map
-	if raw.Status.Map != nil {
-		cfg.StatusMap = make(model.StatusMap, len(raw.Status.Map))
-		for name, entry := range raw.Status.Map {
-			cfg.StatusMap[name] = model.StatusEntry{
-				Category: model.StatusCategory(entry.Category),
-				Order:    entry.Order,
-			}
-		}
 	}
 
 	return cfg, nil

@@ -4,12 +4,11 @@ package scan
 type EntryKind int
 
 const (
-	EntryTask          EntryKind = iota // tasks/**/*.md
-	EntryRootConfig                     // config.toml (root)
-	EntryProjectConfig                  // tasks/**/config.toml
-	EntryTeamConfig                     // teams/*/team.toml
-	EntryIteration                      // teams/*/iterations/*.md
-	EntrySLA                            // sla.toml (root only)
+	EntryTask       EntryKind = iota // tasks/**/*.md
+	EntryRootConfig                  // config.toml (root)
+	EntryTeamConfig                  // teams/*/team.toml
+	EntryIteration                   // teams/*/iterations/*.md
+	EntrySLA                         // sla.toml (root only)
 )
 
 // String returns a human-readable name for the entry kind.
@@ -19,8 +18,6 @@ func (k EntryKind) String() string {
 		return "task"
 	case EntryRootConfig:
 		return "root_config"
-	case EntryProjectConfig:
-		return "project_config"
 	case EntryTeamConfig:
 		return "team_config"
 	case EntryIteration:
