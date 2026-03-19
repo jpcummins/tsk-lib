@@ -3,6 +3,8 @@ package engine
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/jpcummins/tsk-lib/model"
@@ -25,6 +27,9 @@ type Engine struct {
 	searcher    *search.Searcher
 	currentUser string
 }
+
+// ErrTaskNotFound indicates that a requested task path does not exist.
+var ErrTaskNotFound = store.ErrTaskNotFound
 
 // Option configures an Engine.
 type Option func(*Engine)
@@ -149,7 +154,14 @@ func (e *Engine) TaskByPath(ctx context.Context, path model.CanonicalPath) (*mod
 		ctx = context.Background()
 	}
 
-	return e.store.TaskByPath(ctx, path)
+	task, err := e.store.TaskByPath(ctx, path)
+	if err != nil {
+		if errors.Is(err, store.ErrTaskNotFound) {
+			return nil, fmt.Errorf("engine task lookup %s: %w", path, ErrTaskNotFound)
+		}
+		return nil, fmt.Errorf("engine task lookup %s: %w", path, err)
+	}
+	return task, nil
 }
 
 // Close releases resources.

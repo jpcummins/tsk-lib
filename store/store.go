@@ -4,6 +4,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -42,6 +43,9 @@ type QueryExecutor interface {
 type SQLiteStore struct {
 	db *sql.DB
 }
+
+// ErrTaskNotFound indicates that a task path does not exist in the store.
+var ErrTaskNotFound = errors.New("task not found")
 
 // Open creates or opens a SQLite database at the given path.
 func Open(dbPath string) (*SQLiteStore, error) {
@@ -208,7 +212,14 @@ func (s *SQLiteStore) TaskByPath(ctx context.Context, path model.CanonicalPath) 
 	ctx = contextOrBackground(ctx)
 
 	row := s.db.QueryRowContext(ctx, "SELECT path, parent, is_readme, is_stub, redirect_to, created_at, due, assignee, summary, estimate, status, status_category, updated_at, type, weight, body FROM tasks WHERE path = ?", string(path))
-	return scanTask(row)
+	task, err := scanTask(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("task %s: %w", path, ErrTaskNotFound)
+		}
+		return nil, fmt.Errorf("querying task %s: %w", path, err)
+	}
+	return task, nil
 }
 
 // AllTasks retrieves all non-stub tasks.
@@ -325,7 +336,10 @@ func (s *SQLiteStore) QueryTasks(ctx context.Context, queryStr string, params []
 	for _, path := range paths {
 		task, err := s.TaskByPath(ctx, model.CanonicalPath(path))
 		if err != nil {
-			continue
+			if errors.Is(err, ErrTaskNotFound) {
+				continue
+			}
+			return nil, fmt.Errorf("hydrating task %s: %w", path, err)
 		}
 		tasks = append(tasks, task)
 	}
