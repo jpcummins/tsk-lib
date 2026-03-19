@@ -16,6 +16,8 @@ import (
 	"github.com/jpcummins/tsk-lib/scan"
 )
 
+var conformanceNow = time.Date(2026, time.March, 17, 0, 0, 0, 0, time.UTC)
+
 // tskBasePath returns the path to the tsk spec repository.
 func tskBasePath(t *testing.T) string {
 	t.Helper()
@@ -615,7 +617,7 @@ func runQuery(t *testing.T, tc conformance.TestCase) {
 	// Evaluate
 	evalCtx := &query.EvalContext{
 		Repository:         repo,
-		Now:                time.Now(),
+		Now:                conformanceNow,
 		SLAResults:         slaResults,
 		IsReportingContext: isReporting,
 	}
