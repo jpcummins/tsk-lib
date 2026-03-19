@@ -113,7 +113,7 @@ func resolveStatusCategories(repo *model.Repository) {
 		// If no mapping found, check if status is a base category directly
 		if task.Category == "" {
 			switch model.StatusCategory(task.Status) {
-			case model.StatusTodo, model.StatusInProgress, model.StatusDone:
+			case model.StatusIcebox, model.StatusTodo, model.StatusInProgress, model.StatusDone:
 				task.Category = model.StatusCategory(task.Status)
 			}
 		}

@@ -2,10 +2,11 @@ package model
 
 import "time"
 
-// StatusCategory represents the three base status categories.
+// StatusCategory represents the base status categories.
 type StatusCategory string
 
 const (
+	StatusIcebox     StatusCategory = "icebox"
 	StatusTodo       StatusCategory = "todo"
 	StatusInProgress StatusCategory = "in_progress"
 	StatusDone       StatusCategory = "done"
