@@ -78,6 +78,10 @@ func NewDefault(dbPath string, opts ...Option) (*Engine, error) {
 
 // Index scans and parses a tsk repository, writing it to the store.
 func (e *Engine) Index(ctx context.Context, root string) (*model.Repository, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	entries, err := e.scanner.Scan(ctx, root)
 	if err != nil {
 		return nil, err
@@ -89,7 +93,7 @@ func (e *Engine) Index(ctx context.Context, root string) (*model.Repository, err
 	}
 
 	if e.store != nil {
-		if err := e.store.WriteRepository(repo); err != nil {
+		if err := e.store.WriteRepository(ctx, repo); err != nil {
 			return nil, err
 		}
 	}
@@ -98,7 +102,11 @@ func (e *Engine) Index(ctx context.Context, root string) (*model.Repository, err
 }
 
 // Query parses, validates, and executes a DSL query.
-func (e *Engine) Query(dsl string) ([]*model.Task, model.Diagnostics, error) {
+func (e *Engine) Query(ctx context.Context, dsl string) ([]*model.Task, model.Diagnostics, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	expr, err := e.qparser.Parse(dsl)
 	if err != nil {
 		return nil, nil, err
@@ -109,12 +117,12 @@ func (e *Engine) Query(dsl string) ([]*model.Task, model.Diagnostics, error) {
 		return nil, diags, nil
 	}
 
-	sqlStr, params, err := e.compiler.Compile(expr, e.compileContext())
+	sqlStr, params, err := e.compiler.Compile(expr, e.compileContext(ctx))
 	if err != nil {
 		return nil, diags, err
 	}
 
-	tasks, err := e.store.QueryTasks(sqlStr, params)
+	tasks, err := e.store.QueryTasks(ctx, sqlStr, params)
 	if err != nil {
 		return nil, diags, err
 	}
@@ -123,8 +131,12 @@ func (e *Engine) Query(dsl string) ([]*model.Task, model.Diagnostics, error) {
 }
 
 // Search performs a fuzzy text search across tasks.
-func (e *Engine) Search(queryStr string) ([]search.Match, error) {
-	tasks, err := e.store.AllTasks()
+func (e *Engine) Search(ctx context.Context, queryStr string) ([]search.Match, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	tasks, err := e.store.AllTasks(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -132,8 +144,12 @@ func (e *Engine) Search(queryStr string) ([]search.Match, error) {
 }
 
 // TaskByPath retrieves a single task by canonical path.
-func (e *Engine) TaskByPath(path model.CanonicalPath) (*model.Task, error) {
-	return e.store.TaskByPath(path)
+func (e *Engine) TaskByPath(ctx context.Context, path model.CanonicalPath) (*model.Task, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	return e.store.TaskByPath(ctx, path)
 }
 
 // Close releases resources.
@@ -148,10 +164,11 @@ func (e *Engine) Close() error {
 
 type engineContext struct {
 	engine *Engine
+	ctx    context.Context
 }
 
-func (e *Engine) compileContext() tsql.CompileContext {
-	return &engineContext{engine: e}
+func (e *Engine) compileContext(ctx context.Context) tsql.CompileContext {
+	return &engineContext{engine: e, ctx: ctx}
 }
 
 func (c *engineContext) CurrentUser() string {
@@ -167,12 +184,12 @@ func (c *engineContext) CurrentUserAliases() []string {
 	seen := map[string]bool{user: true}
 	aliases := []string{user}
 
-	names, err := c.engine.store.AllTeamNames()
+	names, err := c.engine.store.AllTeamNames(c.ctx)
 	if err != nil {
 		return aliases
 	}
 	for _, name := range names {
-		members, err := c.engine.store.TeamMembers(name)
+		members, err := c.engine.store.TeamMembers(c.ctx, name)
 		if err != nil {
 			continue
 		}
@@ -193,13 +210,13 @@ func (c *engineContext) CurrentUserAliases() []string {
 }
 
 func (c *engineContext) CurrentUserTeams() []string {
-	names, err := c.engine.store.AllTeamNames()
+	names, err := c.engine.store.AllTeamNames(c.ctx)
 	if err != nil {
 		return nil
 	}
 	var teams []string
 	for _, name := range names {
-		members, err := c.engine.store.TeamMembers(name)
+		members, err := c.engine.store.TeamMembers(c.ctx, name)
 		if err != nil {
 			continue
 		}
@@ -214,7 +231,7 @@ func (c *engineContext) CurrentUserTeams() []string {
 }
 
 func (c *engineContext) TeamMembers(teamName string) []string {
-	members, err := c.engine.store.TeamMembers(teamName)
+	members, err := c.engine.store.TeamMembers(c.ctx, teamName)
 	if err != nil {
 		return nil
 	}

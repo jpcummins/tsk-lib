@@ -23,6 +23,10 @@ func NewFSScanner() *FSScanner {
 
 // Scan walks the root directory and returns classified entries.
 func (s *FSScanner) Scan(ctx context.Context, root string) ([]Entry, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	var entries []Entry
 
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -84,6 +88,10 @@ func NewMemScanner(files map[string]string) *MemScanner {
 
 // Scan classifies all files in the in-memory filesystem.
 func (s *MemScanner) Scan(ctx context.Context, _ string) ([]Entry, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	var entries []Entry
 
 	for path, content := range s.Files {

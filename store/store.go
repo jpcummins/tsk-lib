@@ -2,6 +2,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"time"
@@ -20,21 +21,21 @@ type Store interface {
 
 // Writer handles bulk write operations.
 type Writer interface {
-	WriteRepository(repo *model.Repository) error
+	WriteRepository(ctx context.Context, repo *model.Repository) error
 }
 
 // Reader handles read operations.
 type Reader interface {
-	TaskByPath(path model.CanonicalPath) (*model.Task, error)
-	AllTasks() ([]*model.Task, error)
-	IterationsByTeam(team string) ([]*model.Iteration, error)
-	TeamMembers(teamName string) ([]model.TeamMember, error)
-	AllTeamNames() ([]string, error)
+	TaskByPath(ctx context.Context, path model.CanonicalPath) (*model.Task, error)
+	AllTasks(ctx context.Context) ([]*model.Task, error)
+	IterationsByTeam(ctx context.Context, team string) ([]*model.Iteration, error)
+	TeamMembers(ctx context.Context, teamName string) ([]model.TeamMember, error)
+	AllTeamNames(ctx context.Context) ([]string, error)
 }
 
 // QueryExecutor executes compiled SQL queries.
 type QueryExecutor interface {
-	QueryTasks(query string, params []any) ([]*model.Task, error)
+	QueryTasks(ctx context.Context, query string, params []any) ([]*model.Task, error)
 }
 
 // SQLiteStore implements Store using SQLite.
@@ -64,14 +65,23 @@ func Open(dbPath string) (*SQLiteStore, error) {
 	return &SQLiteStore{db: db}, nil
 }
 
+func contextOrBackground(ctx context.Context) context.Context {
+	if ctx == nil {
+		return context.Background()
+	}
+	return ctx
+}
+
 // Close closes the database connection.
 func (s *SQLiteStore) Close() error {
 	return s.db.Close()
 }
 
 // WriteRepository writes a complete repository to the database in a single transaction.
-func (s *SQLiteStore) WriteRepository(repo *model.Repository) error {
-	tx, err := s.db.Begin()
+func (s *SQLiteStore) WriteRepository(ctx context.Context, repo *model.Repository) error {
+	ctx = contextOrBackground(ctx)
+
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -82,14 +92,14 @@ func (s *SQLiteStore) WriteRepository(repo *model.Repository) error {
 		"iteration_tasks", "iterations", "change_log", "task_dependencies",
 		"task_labels", "tasks", "repository_meta"}
 	for _, table := range tables {
-		if _, err := tx.Exec("DELETE FROM " + table); err != nil {
+		if _, err := tx.ExecContext(ctx, "DELETE FROM "+table); err != nil {
 			return fmt.Errorf("clearing %s: %w", table, err)
 		}
 	}
 
 	// Write version
 	if repo.Version != "" {
-		if _, err := tx.Exec("INSERT INTO repository_meta (key, value) VALUES ('version', ?)", repo.Version); err != nil {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO repository_meta (key, value) VALUES ('version', ?)", repo.Version); err != nil {
 			return err
 		}
 	}
@@ -114,7 +124,7 @@ func (s *SQLiteStore) WriteRepository(repo *model.Repository) error {
 			estimate = &s
 		}
 
-		_, err := tx.Exec(`INSERT INTO tasks (path, parent, is_readme, is_stub, redirect_to,
+		_, err := tx.ExecContext(ctx, `INSERT INTO tasks (path, parent, is_readme, is_stub, redirect_to,
 			created_at, due, assignee, summary, estimate, status, status_category,
 			updated_at, type, weight, body) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			string(task.Path), string(task.Parent), task.IsReadme, task.IsStub,
@@ -127,7 +137,7 @@ func (s *SQLiteStore) WriteRepository(repo *model.Repository) error {
 
 		// Labels
 		for _, label := range task.Labels {
-			if _, err := tx.Exec("INSERT INTO task_labels (task_path, value) VALUES (?, ?)",
+			if _, err := tx.ExecContext(ctx, "INSERT INTO task_labels (task_path, value) VALUES (?, ?)",
 				string(task.Path), label); err != nil {
 				return err
 			}
@@ -135,7 +145,7 @@ func (s *SQLiteStore) WriteRepository(repo *model.Repository) error {
 
 		// Dependencies
 		for _, dep := range task.Dependencies {
-			if _, err := tx.Exec("INSERT INTO task_dependencies (task_path, value) VALUES (?, ?)",
+			if _, err := tx.ExecContext(ctx, "INSERT INTO task_dependencies (task_path, value) VALUES (?, ?)",
 				string(task.Path), string(dep)); err != nil {
 				return err
 			}
@@ -143,7 +153,7 @@ func (s *SQLiteStore) WriteRepository(repo *model.Repository) error {
 
 		// Change log
 		for _, cl := range task.ChangeLog {
-			if _, err := tx.Exec("INSERT INTO change_log (task_path, field, from_value, to_value, at) VALUES (?, ?, ?, ?, ?)",
+			if _, err := tx.ExecContext(ctx, "INSERT INTO change_log (task_path, field, from_value, to_value, at) VALUES (?, ?, ?, ?, ?)",
 				string(task.Path), cl.Field, cl.From, cl.To, cl.At.Format(time.RFC3339)); err != nil {
 				return err
 			}
@@ -152,11 +162,11 @@ func (s *SQLiteStore) WriteRepository(repo *model.Repository) error {
 
 	// Write teams
 	for _, team := range repo.Teams {
-		if _, err := tx.Exec("INSERT INTO teams (name) VALUES (?)", team.Name); err != nil {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO teams (name) VALUES (?)", team.Name); err != nil {
 			return err
 		}
 		for _, member := range team.Members {
-			if _, err := tx.Exec("INSERT INTO team_members (team_name, identifier, value, display_name, email) VALUES (?, ?, ?, ?, ?)",
+			if _, err := tx.ExecContext(ctx, "INSERT INTO team_members (team_name, identifier, value, display_name, email) VALUES (?, ?, ?, ?, ?)",
 				team.Name, member.Identifier, member.Value, member.Name, member.Email); err != nil {
 				return err
 			}
@@ -165,12 +175,12 @@ func (s *SQLiteStore) WriteRepository(repo *model.Repository) error {
 
 	// Write iterations
 	for _, iter := range repo.Iterations {
-		if _, err := tx.Exec("INSERT INTO iterations (id, team, start_time, end_time, body) VALUES (?, ?, ?, ?, ?)",
+		if _, err := tx.ExecContext(ctx, "INSERT INTO iterations (id, team, start_time, end_time, body) VALUES (?, ?, ?, ?, ?)",
 			iter.ID, iter.Team, iter.Start.Format(time.RFC3339), iter.End.Format(time.RFC3339), iter.Body); err != nil {
 			return err
 		}
 		for i, tp := range iter.Tasks {
-			if _, err := tx.Exec("INSERT INTO iteration_tasks (iteration_id, task_path, sort_order) VALUES (?, ?, ?)",
+			if _, err := tx.ExecContext(ctx, "INSERT INTO iteration_tasks (iteration_id, task_path, sort_order) VALUES (?, ?, ?)",
 				iter.ID, string(tp), i); err != nil {
 				return err
 			}
@@ -184,7 +194,7 @@ func (s *SQLiteStore) WriteRepository(repo *model.Repository) error {
 			s := rule.WarnAt.String()
 			warnAt = &s
 		}
-		if _, err := tx.Exec("INSERT INTO sla_rules (id, name, query, target, warn_at, start_event, stop_event, severity) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+		if _, err := tx.ExecContext(ctx, "INSERT INTO sla_rules (id, name, query, target, warn_at, start_event, stop_event, severity) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
 			rule.ID, rule.Name, rule.Query, rule.Target.String(), warnAt, rule.Start, rule.Stop, rule.Severity); err != nil {
 			return err
 		}
@@ -194,14 +204,18 @@ func (s *SQLiteStore) WriteRepository(repo *model.Repository) error {
 }
 
 // TaskByPath retrieves a single task by its canonical path.
-func (s *SQLiteStore) TaskByPath(path model.CanonicalPath) (*model.Task, error) {
-	row := s.db.QueryRow("SELECT path, parent, is_readme, is_stub, redirect_to, created_at, due, assignee, summary, estimate, status, status_category, updated_at, type, weight, body FROM tasks WHERE path = ?", string(path))
+func (s *SQLiteStore) TaskByPath(ctx context.Context, path model.CanonicalPath) (*model.Task, error) {
+	ctx = contextOrBackground(ctx)
+
+	row := s.db.QueryRowContext(ctx, "SELECT path, parent, is_readme, is_stub, redirect_to, created_at, due, assignee, summary, estimate, status, status_category, updated_at, type, weight, body FROM tasks WHERE path = ?", string(path))
 	return scanTask(row)
 }
 
 // AllTasks retrieves all non-stub tasks.
-func (s *SQLiteStore) AllTasks() ([]*model.Task, error) {
-	rows, err := s.db.Query("SELECT path, parent, is_readme, is_stub, redirect_to, created_at, due, assignee, summary, estimate, status, status_category, updated_at, type, weight, body FROM tasks WHERE is_stub = 0")
+func (s *SQLiteStore) AllTasks(ctx context.Context) ([]*model.Task, error) {
+	ctx = contextOrBackground(ctx)
+
+	rows, err := s.db.QueryContext(ctx, "SELECT path, parent, is_readme, is_stub, redirect_to, created_at, due, assignee, summary, estimate, status, status_category, updated_at, type, weight, body FROM tasks WHERE is_stub = 0")
 	if err != nil {
 		return nil, err
 	}
@@ -219,8 +233,10 @@ func (s *SQLiteStore) AllTasks() ([]*model.Task, error) {
 }
 
 // IterationsByTeam retrieves iterations for a team.
-func (s *SQLiteStore) IterationsByTeam(team string) ([]*model.Iteration, error) {
-	rows, err := s.db.Query("SELECT id, team, start_time, end_time, body FROM iterations WHERE team = ?", team)
+func (s *SQLiteStore) IterationsByTeam(ctx context.Context, team string) ([]*model.Iteration, error) {
+	ctx = contextOrBackground(ctx)
+
+	rows, err := s.db.QueryContext(ctx, "SELECT id, team, start_time, end_time, body FROM iterations WHERE team = ?", team)
 	if err != nil {
 		return nil, err
 	}
@@ -241,8 +257,10 @@ func (s *SQLiteStore) IterationsByTeam(team string) ([]*model.Iteration, error) 
 }
 
 // TeamMembers retrieves members of a team.
-func (s *SQLiteStore) TeamMembers(teamName string) ([]model.TeamMember, error) {
-	rows, err := s.db.Query("SELECT identifier, value, display_name, email FROM team_members WHERE team_name = ?", teamName)
+func (s *SQLiteStore) TeamMembers(ctx context.Context, teamName string) ([]model.TeamMember, error) {
+	ctx = contextOrBackground(ctx)
+
+	rows, err := s.db.QueryContext(ctx, "SELECT identifier, value, display_name, email FROM team_members WHERE team_name = ?", teamName)
 	if err != nil {
 		return nil, err
 	}
@@ -260,8 +278,10 @@ func (s *SQLiteStore) TeamMembers(teamName string) ([]model.TeamMember, error) {
 }
 
 // AllTeamNames retrieves all team names.
-func (s *SQLiteStore) AllTeamNames() ([]string, error) {
-	rows, err := s.db.Query("SELECT name FROM teams ORDER BY name")
+func (s *SQLiteStore) AllTeamNames(ctx context.Context) ([]string, error) {
+	ctx = contextOrBackground(ctx)
+
+	rows, err := s.db.QueryContext(ctx, "SELECT name FROM teams ORDER BY name")
 	if err != nil {
 		return nil, err
 	}
@@ -279,8 +299,10 @@ func (s *SQLiteStore) AllTeamNames() ([]string, error) {
 }
 
 // QueryTasks executes a compiled SQL query and returns matching tasks.
-func (s *SQLiteStore) QueryTasks(queryStr string, params []any) ([]*model.Task, error) {
-	rows, err := s.db.Query(queryStr, params...)
+func (s *SQLiteStore) QueryTasks(ctx context.Context, queryStr string, params []any) ([]*model.Task, error) {
+	ctx = contextOrBackground(ctx)
+
+	rows, err := s.db.QueryContext(ctx, queryStr, params...)
 	if err != nil {
 		return nil, err
 	}
@@ -301,7 +323,7 @@ func (s *SQLiteStore) QueryTasks(queryStr string, params []any) ([]*model.Task, 
 	// Hydrate full task objects
 	var tasks []*model.Task
 	for _, path := range paths {
-		task, err := s.TaskByPath(model.CanonicalPath(path))
+		task, err := s.TaskByPath(ctx, model.CanonicalPath(path))
 		if err != nil {
 			continue
 		}
