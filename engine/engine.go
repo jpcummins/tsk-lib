@@ -2,6 +2,7 @@
 package engine
 
 import (
+	"context"
 	"time"
 
 	"github.com/jpcummins/tsk-lib/model"
@@ -76,8 +77,8 @@ func NewDefault(dbPath string, opts ...Option) (*Engine, error) {
 }
 
 // Index scans and parses a tsk repository, writing it to the store.
-func (e *Engine) Index(root string) (*model.Repository, error) {
-	entries, err := e.scanner.Scan(root)
+func (e *Engine) Index(ctx context.Context, root string) (*model.Repository, error) {
+	entries, err := e.scanner.Scan(ctx, root)
 	if err != nil {
 		return nil, err
 	}

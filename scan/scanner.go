@@ -1,6 +1,7 @@
 package scan
 
 import (
+	"context"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -9,7 +10,7 @@ import (
 
 // Scanner walks a tsk repository and classifies files.
 type Scanner interface {
-	Scan(root string) ([]Entry, error)
+	Scan(ctx context.Context, root string) ([]Entry, error)
 }
 
 // FSScanner implements Scanner by walking the real filesystem.
@@ -21,10 +22,13 @@ func NewFSScanner() *FSScanner {
 }
 
 // Scan walks the root directory and returns classified entries.
-func (s *FSScanner) Scan(root string) ([]Entry, error) {
+func (s *FSScanner) Scan(ctx context.Context, root string) ([]Entry, error) {
 	var entries []Entry
 
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if err != nil {
 			return err
 		}
@@ -79,10 +83,13 @@ func NewMemScanner(files map[string]string) *MemScanner {
 }
 
 // Scan classifies all files in the in-memory filesystem.
-func (s *MemScanner) Scan(_ string) ([]Entry, error) {
+func (s *MemScanner) Scan(ctx context.Context, _ string) ([]Entry, error) {
 	var entries []Entry
 
 	for path, content := range s.Files {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		path = filepath.ToSlash(path)
 
 		kind, ok := classify(path)

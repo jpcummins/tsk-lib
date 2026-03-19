@@ -1,6 +1,7 @@
 package conformance_test
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"sort"
@@ -186,7 +187,7 @@ func runParseConfig(t *testing.T, tc conformance.TestCase) {
 	files[tc.Inputs.Path] = tc.Inputs.Content
 
 	scanner := scan.NewMemScanner(files)
-	entries, err := scanner.Scan("")
+	entries, err := scanner.Scan(context.Background(), "")
 	if err != nil {
 		t.Fatalf("Scan failed: %v", err)
 	}
@@ -244,7 +245,7 @@ func runResolveStub(t *testing.T, tc conformance.TestCase) {
 	t.Helper()
 
 	scanner := scan.NewMemScanner(tc.Files)
-	entries, err := scanner.Scan("")
+	entries, err := scanner.Scan(context.Background(), "")
 	if err != nil {
 		t.Fatalf("Scan failed: %v", err)
 	}
@@ -281,7 +282,7 @@ func runResolveTask(t *testing.T, tc conformance.TestCase) {
 	t.Helper()
 
 	scanner := scan.NewMemScanner(tc.Files)
-	entries, err := scanner.Scan("")
+	entries, err := scanner.Scan(context.Background(), "")
 	if err != nil {
 		t.Fatalf("Scan failed: %v", err)
 	}
@@ -321,7 +322,7 @@ func runResolveHierarchy(t *testing.T, tc conformance.TestCase) {
 	t.Helper()
 
 	scanner := scan.NewMemScanner(tc.Files)
-	entries, err := scanner.Scan("")
+	entries, err := scanner.Scan(context.Background(), "")
 	if err != nil {
 		t.Fatalf("Scan failed: %v", err)
 	}
@@ -363,7 +364,7 @@ func runResolveAssignee(t *testing.T, tc conformance.TestCase) {
 	}
 
 	scanner := scan.NewMemScanner(files)
-	entries, err := scanner.Scan("")
+	entries, err := scanner.Scan(context.Background(), "")
 	if err != nil {
 		t.Fatalf("Scan failed: %v", err)
 	}
@@ -396,7 +397,7 @@ func runEvaluateSLA(t *testing.T, tc conformance.TestCase) {
 		files = make(map[string]string)
 	}
 	scanner := scan.NewMemScanner(files)
-	entries, err := scanner.Scan("")
+	entries, err := scanner.Scan(context.Background(), "")
 	if err != nil {
 		t.Fatalf("Scan failed: %v", err)
 	}
@@ -577,7 +578,7 @@ func runQuery(t *testing.T, tc conformance.TestCase) {
 		files = make(map[string]string)
 	}
 	scanner := scan.NewMemScanner(files)
-	entries, err := scanner.Scan("")
+	entries, err := scanner.Scan(context.Background(), "")
 	if err != nil {
 		t.Fatalf("Scan failed: %v", err)
 	}
@@ -655,7 +656,7 @@ func runGenerateReport(t *testing.T, tc conformance.TestCase) {
 	}
 
 	scanner := scan.NewMemScanner(files)
-	entries, err := scanner.Scan("")
+	entries, err := scanner.Scan(context.Background(), "")
 	if err != nil {
 		t.Fatalf("Scan failed: %v", err)
 	}
