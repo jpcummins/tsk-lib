@@ -204,6 +204,26 @@ func (s *SQLiteStore) WriteRepository(ctx context.Context, repo *model.Repositor
 		}
 	}
 
+	// Write SLA results
+	for _, result := range repo.SLAResults {
+		var startTime, stopTime *string
+		if result.StartTime != nil {
+			s := result.StartTime.Format(time.RFC3339)
+			startTime = &s
+		}
+		if result.StopTime != nil {
+			s := result.StopTime.Format(time.RFC3339)
+			stopTime = &s
+		}
+		if _, err := tx.ExecContext(ctx,
+			"INSERT INTO sla_results (rule_id, task_path, status, start_time, stop_time, target, elapsed, remaining) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+			result.RuleID, string(result.TaskPath), string(result.Status),
+			startTime, stopTime,
+			result.Target.String(), result.Elapsed.String(), result.Remaining.String()); err != nil {
+			return fmt.Errorf("writing sla_result %s/%s: %w", result.RuleID, result.TaskPath, err)
+		}
+	}
+
 	return tx.Commit()
 }
 
@@ -354,12 +374,12 @@ type scannable interface {
 
 func scanTask(row *sql.Row) (*model.Task, error) {
 	var task model.Task
-	var parent, redirectTo, createdAt, due, updatedAt, estimate, category sql.NullString
+	var parent, redirectTo, createdAt, due, updatedAt, estimate sql.NullString
 	var weight sql.NullFloat64
 
 	err := row.Scan(&task.Path, &parent, &task.IsReadme, &task.IsStub, &redirectTo,
 		&createdAt, &due, &task.Assignee, &task.Summary, &estimate,
-		&task.Status, &category, &updatedAt, &task.Type, &weight, &task.Body)
+		&task.Status, &updatedAt, &task.Type, &weight, &task.Body)
 	if err != nil {
 		return nil, err
 	}
@@ -369,9 +389,6 @@ func scanTask(row *sql.Row) (*model.Task, error) {
 	}
 	if redirectTo.Valid {
 		task.RedirectTo = model.CanonicalPath(redirectTo.String)
-	}
-	if category.Valid {
-		task.Category = model.StatusCategory(category.String)
 	}
 	if weight.Valid {
 		task.Weight = &weight.Float64

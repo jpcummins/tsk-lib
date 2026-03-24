@@ -26,6 +26,7 @@ type Engine struct {
 	qvalidator  query.Validator
 	searcher    *search.Searcher
 	currentUser string
+	now         func() time.Time
 }
 
 // ErrTaskNotFound indicates that a requested task path does not exist.
@@ -38,6 +39,14 @@ type Option func(*Engine)
 func WithCurrentUser(user string) Option {
 	return func(e *Engine) {
 		e.currentUser = user
+	}
+}
+
+// WithNow sets a custom clock function used during SLA evaluation in Index.
+// This is primarily useful for testing; production code uses time.Now.
+func WithNow(fn func() time.Time) Option {
+	return func(e *Engine) {
+		e.now = fn
 	}
 }
 
@@ -59,11 +68,20 @@ func New(
 		qparser:    qparser,
 		qvalidator: qvalidator,
 		searcher:   search.NewSearcher(),
+		now:        time.Now,
 	}
 	for _, opt := range opts {
 		opt(e)
 	}
 	return e
+}
+
+// nowTime returns the current time using the configured clock.
+func (e *Engine) nowTime() time.Time {
+	if e.now != nil {
+		return e.now()
+	}
+	return time.Now()
 }
 
 // NewDefault creates an Engine with default implementations.
@@ -81,7 +99,8 @@ func NewDefault(dbPath string, opts ...Option) (*Engine, error) {
 	return New(sc, p, st, comp, qp, qv, opts...), nil
 }
 
-// Index scans and parses a tsk repository, writing it to the store.
+// Index scans and parses a tsk repository, evaluates SLA rules, and writes
+// everything to the store.
 func (e *Engine) Index(ctx context.Context, root string) (*model.Repository, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -97,6 +116,10 @@ func (e *Engine) Index(ctx context.Context, root string) (*model.Repository, err
 		return nil, err
 	}
 
+	// Evaluate SLA rules against the parsed repository. Results are persisted
+	// to the store so that sla.* queries work transparently in Query.
+	repo.SLAResults = evaluateSLA(repo, e.nowTime())
+
 	if e.store != nil {
 		if err := e.store.WriteRepository(ctx, repo); err != nil {
 			return nil, err
@@ -107,6 +130,8 @@ func (e *Engine) Index(ctx context.Context, root string) (*model.Repository, err
 }
 
 // Query parses, validates, and executes a DSL query.
+// Queries containing sla.* fields are automatically executed in a reporting
+// context against SLA results that were computed and persisted during Index.
 func (e *Engine) Query(ctx context.Context, dsl string) ([]*model.Task, model.Diagnostics, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -117,7 +142,14 @@ func (e *Engine) Query(ctx context.Context, dsl string) ([]*model.Task, model.Di
 		return nil, nil, err
 	}
 
-	diags := e.qvalidator.Validate(expr, nil)
+	// Automatically enable the reporting context when the query references
+	// sla.* fields. SLA results are populated by Index and stored in the
+	// sla_results table, so no separate evaluation step is needed here.
+	valCtx := &query.ValidationContext{
+		IsReportingContext: containsSLAFields(expr),
+	}
+
+	diags := e.qvalidator.Validate(expr, valCtx)
 	if diags.HasErrors() {
 		return nil, diags, nil
 	}
@@ -258,8 +290,7 @@ func (c *engineContext) TeamMembers(teamName string) []string {
 }
 
 func (c *engineContext) ResolveDate(spec string) string {
-	now := time.Now()
-	resolved := query.ResolveDate(spec, now)
+	resolved := query.ResolveDate(spec, c.engine.nowTime())
 	if resolved != nil {
 		return resolved.Format(time.RFC3339)
 	}
