@@ -7,7 +7,7 @@ import (
 	"github.com/jpcummins/tsk-lib/model"
 )
 
-// rawConfig is the TOML representation of a config.toml file.
+// rawConfig is the TOML representation of a tsk.toml file.
 type rawConfig struct {
 	Version string `toml:"version"`
 }
@@ -34,7 +34,7 @@ type rawSLARule struct {
 	Severity string `toml:"severity"`
 }
 
-// parseConfig parses a config.toml file.
+// parseConfig parses a tsk.toml file.
 func parseConfig(data []byte, path string) (*model.Config, error) {
 	var raw rawConfig
 	if err := toml.Unmarshal(data, &raw); err != nil {
@@ -46,7 +46,7 @@ func parseConfig(data []byte, path string) (*model.Config, error) {
 	}
 
 	// Version is only valid at root
-	isRoot := path == "" || path == "config.toml"
+	isRoot := path == "" || path == "tsk.toml"
 	if isRoot {
 		cfg.Version = raw.Version
 	}

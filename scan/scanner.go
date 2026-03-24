@@ -119,8 +119,8 @@ func (s *MemScanner) Scan(ctx context.Context, _ string) ([]Entry, error) {
 func classify(rel string) (EntryKind, bool) {
 	parts := strings.Split(rel, "/")
 
-	// Root config.toml
-	if rel == "config.toml" {
+	// Root tsk.toml
+	if rel == "tsk.toml" {
 		return EntryRootConfig, true
 	}
 

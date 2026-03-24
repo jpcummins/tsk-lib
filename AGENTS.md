@@ -30,7 +30,7 @@ It is based on the current Go module, source tree, and tests in this repository.
 - Keep changes library-oriented unless the task explicitly introduces a new executable.
 - Follow existing package boundaries rather than creating cross-package shortcuts.
 - Prefer clarity and discoverability over clever structure or abstraction.
-- Preserve the repository layout expected by the scanner: root `config.toml`, root `sla.toml`, `tasks/...`, `teams/<team>/team.toml`, and `teams/<team>/iterations/*.md`.
+- Preserve the repository layout expected by the scanner: root `tsk.toml`, root `sla.toml`, `tasks/...`, `teams/<team>/team.toml`, and `teams/<team>/iterations/*.md`.
 
 ## Build Commands
 

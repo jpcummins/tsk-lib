@@ -5,7 +5,7 @@ type EntryKind int
 
 const (
 	EntryTask       EntryKind = iota // tasks/**/*.md
-	EntryRootConfig                  // config.toml (root)
+	EntryRootConfig                  // tsk.toml (root)
 	EntryTeamConfig                  // teams/*/team.toml
 	EntryIteration                   // teams/*/iterations/*.md
 	EntrySLA                         // sla.toml (root only)

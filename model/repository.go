@@ -2,7 +2,7 @@ package model
 
 // Repository is the aggregate root for a fully resolved tsk repository.
 type Repository struct {
-	// Version is the repository spec version from root config.toml.
+	// Version is the repository spec version from root tsk.toml.
 	Version string
 
 	// Tasks maps canonical paths to resolved tasks.

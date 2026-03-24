@@ -37,6 +37,10 @@ const (
 
 	// SLA warnings
 	CodeSLAStatusMissingUpdatedAt DiagnosticCode = "SLA_STATUS_MISSING_UPDATED_AT"
+
+	// Config errors
+	CodeConfigMissing   DiagnosticCode = "CONFIG_MISSING"
+	CodeConfigNoVersion DiagnosticCode = "CONFIG_NO_VERSION"
 )
 
 // Diagnostic represents a structured error or warning.

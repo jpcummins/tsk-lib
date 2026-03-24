@@ -57,6 +57,8 @@ func (p *DefaultParser) parseFiles(entries []scan.Entry, repo *model.Repository)
 	// Collect tasks, potentially multiple per path
 	tasksByPath := make(map[model.CanonicalPath][]*model.Task)
 
+	var foundRootConfig bool
+
 	for _, entry := range entries {
 		switch entry.Kind {
 		case scan.EntryTask:
@@ -67,6 +69,7 @@ func (p *DefaultParser) parseFiles(entries []scan.Entry, repo *model.Repository)
 			tasksByPath[task.Path] = append(tasksByPath[task.Path], task)
 
 		case scan.EntryRootConfig:
+			foundRootConfig = true
 			cfg, err := parseConfig(entry.Content, "")
 			if err != nil {
 				return fmt.Errorf("parsing root config: %w", err)
@@ -100,6 +103,18 @@ func (p *DefaultParser) parseFiles(entries []scan.Entry, repo *model.Repository)
 			}
 			repo.SLARules = append(repo.SLARules, rules...)
 		}
+	}
+
+	// Validate required tsk.toml and version
+	if !foundRootConfig {
+		repo.Diagnostics = append(repo.Diagnostics, model.NewError(
+			model.CodeConfigMissing,
+			"tsk.toml is required at repository root"))
+	}
+	if repo.Version == "" && foundRootConfig {
+		repo.Diagnostics = append(repo.Diagnostics, model.NewError(
+			model.CodeConfigNoVersion,
+			"tsk.toml must include a version field"))
 	}
 
 	// Resolve path conflicts: README.md (directory) takes precedence over leaf files
